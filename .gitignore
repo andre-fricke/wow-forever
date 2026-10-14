@@ -1,0 +1,9 @@
+# macOS and Python
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# Local snapshots and restore data can contain private account/character information.
+/tools/addon-backup/Backups/
+/tools/addon-backup/Ruecksicherungen/
+/tools/addon-backup/latest.json
