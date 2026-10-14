@@ -4,7 +4,7 @@ Standalone macOS tool for versioned addon/UI backups and migration to a new char
 
 ## Getting started
 
-Double-click `WoW-Addon-Backup.command` in Finder. The menu offers backup creation/updates, restoration, undo, and integrity checks. Quit WoW completely before creating a backup or importing settings.
+Double-click `WoW-Addon-Backup.command` in Finder. The menu offers backup creation/updates, restoration, undo, integrity checks, and separate character/account macro restoration. After each action, the tool returns to the main menu so you can create a backup and restore it in the same window. Choose **0 – Exit** to quit. Failed or cancelled actions also return to the menu. Quit WoW completely before creating a backup or importing settings.
 
 - [User guide](GUIDE.md)
 - [Validation report](VALIDATION.md)
@@ -18,6 +18,8 @@ Run from this directory:
 ```sh
 python3 -B tests/test_core.py
 python3 -B tests/test_snapshots.py
+python3 -B tests/test_macros.py
+python3 -B tests/test_menu.py
 ```
 
 These tests create synthetic data in temporary directories and do not modify a WoW installation. They cover character mapping, Unicode, archives, backup updates, installation, recovery, and failure handling.

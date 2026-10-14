@@ -75,6 +75,12 @@ def file_sha(p):
     return h.hexdigest()
 
 def stamp():return dt.datetime.now().astimezone().strftime('%Y%m%d-%H%M%S-%f')
+def backup_name_part(value):
+    # Keep Unicode names readable, but exclude path separators and reserved characters.
+    cleaned=''.join(c if c.isalnum() or c in ' -_' else '-' for c in value)
+    cleaned=re.sub(r'[\s-]+','-',cleaned).strip('-_')
+    return cleaned.encode('utf-8')[:80].decode('utf-8',errors='ignore').rstrip('-_') or 'Unknown'
+
 def json_write(path,value):
     path.parent.mkdir(parents=True,exist_ok=True)
     temp=path.with_suffix(path.suffix+'.tmp')
@@ -180,7 +186,8 @@ def create_backup(client,char):
     installed=inventory(client/'Interface/AddOns')
     unsupported=audit_support(client,char)
     SNAPSHOTS.mkdir(parents=True,exist_ok=True)
-    dest=SNAPSHOTS/(stamp()+'.zip'); temp=dest.with_suffix('.partial')
+    filename=stamp()+'_'+backup_name_part(info['full'])+'_'+backup_name_part(info['realm'])+'.zip'
+    dest=SNAPSHOTS/filename; temp=dest.with_suffix('.partial')
     members={}; roots=[client/'Interface/AddOns',client/'WTF']
     print('Backing up addon files and all locally saved WTF settings …',flush=True)
     try:
@@ -208,6 +215,7 @@ def create_backup(client,char):
         json_write(HERE/'latest.json',{'backup':dest.relative_to(HERE).as_posix()})
         print(f'Backup verified: {dest}\n{len(members)} files, {dest.stat().st_size//1024//1024} MiB compressed.')
         if unsupported:print('Review before restoring: '+', '.join(unsupported))
+        print(f'Backup created: {dest.name}',flush=True)
         return dest
     except BaseException:
         temp.unlink(missing_ok=True)
@@ -554,6 +562,40 @@ def restore_plan(archive,manifest,client,char):
         put(char/'AddOns.txt',activation_data(z,manifest,set(actual),helper_enabled=False))
     return plan,notes,target
 
+def macro_plan(archive, manifest, client, char, scope='character'):
+    """Restore complete macro files without changing macro bodies or identifiers."""
+    client=client.resolve();char=char.resolve()
+    if char not in [p.resolve() for p in characters(client)]:
+        raise ValueError('Target character does not belong to the destination client')
+    if scope not in ('character','account','both'):
+        raise ValueError('Unknown macro scope: '+scope)
+    source=PurePosixPath('client')/manifest['source_character']
+    locations={'character':(source,char),'account':(source.parent.parent,char.parent.parent)}
+    plan={};notes=[]
+    with zipfile.ZipFile(archive) as z:
+        for kind in ('character','account') if scope=='both' else (scope,):
+            src,dst=locations[kind]
+            member=str(src/'macros-cache.txt')
+            if member not in manifest['files']:
+                notes.append(kind.capitalize()+': no macro file in this backup; destination unchanged.')
+                continue
+            data=z.read(member)
+            # Validate the selected payload even when called outside the CLI/menu.
+            if sha(data)!=manifest['files'][member]['sha256']:
+                raise ValueError('Corrupted backup file: '+member)
+            rel=(dst/'macros-cache.txt').relative_to(client).as_posix()
+            target=rooted(client,rel)
+            count=sum(line.startswith(b'VER ') for line in data.splitlines())
+            notes.append(f'{kind.capitalize()}: {count} saved macros; replace the complete destination macro file: {rel}')
+            if not target.exists() or target.read_bytes()!=data:plan[rel]=data
+    return plan,notes
+
+def show_macro_notes(notes):
+    for note in notes:print(note)
+    print('Macro bodies are copied unchanged. Check class-specific spells and explicit character names in the game.')
+    print('Action bar placement is not restored. Check the macros after login; live client/server synchronization has not been validated.')
+
+
 def latest_backup():
     p=HERE/'latest.json'
     if p.exists():
@@ -595,7 +637,7 @@ def closed_prompt():
     if result.returncode==0:
         running=[line.strip() for line in result.stdout.splitlines() if 'World of Warcraft' in line and '/Contents/MacOS/' in line and 'Launcher' not in line and 'Helper' not in line]
         if running:raise ValueError('WoW is still running. Quit it completely, then restart this tool.')
-    if input('Have you quit WoW completely? Type YES: ').strip().upper()!='YES':raise ValueError('Cancelled; no settings restored.')
+    if input('Have you quit WoW completely? [Y/n]: ').strip().lower() not in ('','y','yes'):raise ValueError('Cancelled; no settings restored.')
 
 def choose_snapshot():
     current=latest_backup()
@@ -603,10 +645,23 @@ def choose_snapshot():
     return Path(answer.strip('"\'' )).expanduser().resolve() if answer else current
 
 def menu():
+    while True:
+        try:
+            if menu_action() is False:return
+        except EOFError:
+            print('\nExiting.')
+            return
+        except KeyboardInterrupt:
+            print('\nAction cancelled. Returning to the main menu.')
+        except (ValueError,OSError,KeyError,IndexError,zipfile.BadZipFile) as error:
+            print('\nCancelled: '+str(error),file=sys.stderr)
+        print()
+
+def menu_action():
     print('WoW – Addon Backup for Beta → Release\n')
-    print('1  Create / update backup\n2  Restore backup to a release character\n3  Undo recent changes\n4  Verify backup\n0  Exit')
+    print('1  Create / update backup\n2  Restore backup to a release character\n3  Undo recent changes\n4  Verify backup\n5  Restore macros to another character\n0  Exit')
     action=input('Selection: ').strip()
-    if action=='0':return
+    if action=='0':return False
     if action=='1':
         client=choose_client(DEFAULT_CLIENT)
         char=choose_character(client,'Cannot Hotalot')
@@ -648,15 +703,29 @@ def menu():
         archive=choose_snapshot();manifest=verify_backup(archive)
         print(f'Backup is valid: {len(manifest["files"])} files, {len(manifest["addons"])} addon directories, created {manifest["created"]}.')
         if manifest['unsupported']:print('Needs review: '+', '.join(manifest['unsupported']))
+    elif action=='5':
+        archive=choose_snapshot();print('Verifying backup …',flush=True);manifest=verify_backup(archive)
+        print('Source character: '+manifest['source_identity']['full'])
+        client=choose_client();char=choose_character(client)
+        scope=input('Macro scope: character / account / both [Enter: character]: ').strip().lower() or 'character'
+        plan,notes=macro_plan(archive,manifest,client,char,scope)
+        print('Destination: '+str(char))
+        if scope in ('account','both'):print('Account macros are shared by ALL characters on the destination account.')
+        show_macro_notes(notes)
+        if not plan:print('No changes required.');return
+        closed_prompt()
+        if input('Type RESTORE to replace the selected macro files: ').strip()!='RESTORE':return
+        apply_plan(client,plan,'Restore macros to '+char.name+' ('+scope+')')
     else:raise ValueError('Unknown selection')
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('action',nargs='?',choices=['menu','backup','verify','prepare','restore','undo'],default='menu')
+    ap.add_argument('action',nargs='?',choices=['menu','backup','verify','prepare','restore','restore-macros','undo'],default='menu')
     ap.add_argument('--client',type=Path);ap.add_argument('--character',type=Path)
     ap.add_argument('--backup',type=Path);ap.add_argument('--recovery',type=Path)
     ap.add_argument('--apply',action='store_true');ap.add_argument('--closed',action='store_true')
     ap.add_argument('--replace-addons',action='store_true',help='Also replace existing addon versions with versions from the backup')
+    ap.add_argument('--macro-scope',choices=['character','account','both'],default='character',help='Macro files to replace with restore-macros (default: character)')
     args=ap.parse_args()
     if args.action=='menu':return menu()
     if args.action=='backup':
@@ -671,7 +740,12 @@ def main():
         print(f'Backup is valid: {len(manifest["files"])} files.');return
     if not args.client:raise ValueError('--client is required')
     client=args.client.resolve()
-    if args.action=='prepare':
+    if args.action=='restore-macros':
+        if not args.character:raise ValueError('--character is required')
+        plan,notes=macro_plan(archive,manifest,client,args.character,args.macro_scope)
+        if args.macro_scope in ('account','both'):print('Account macros are shared by ALL characters on the destination account.')
+        show_macro_notes(notes)
+    elif args.action=='prepare':
         if not args.character:raise ValueError('--character is required')
         char=args.character.resolve()
         if char not in [p.resolve() for p in characters(client)]:raise ValueError('Character does not belong to the destination client')

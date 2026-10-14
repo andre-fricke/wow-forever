@@ -1,6 +1,6 @@
 # WoW Addon Backup: last beta day → first release day
 
-Double-click **WoW-Addon-Backup.command** in Finder to open the Terminal menu. Keep the entire `tools/addon-backup` directory together: it contains the tool, character detection helper, backups, and recovery data.
+Double-click **WoW-Addon-Backup.command** in Finder to open the Terminal menu. After each action, the menu appears again in the same window. Select **0 – Exit** to quit. Keep the entire `tools/addon-backup` directory together: it contains the tool, character detection helper, backups, and recovery data.
 
 ## Existing snapshot
 
@@ -15,9 +15,9 @@ This tool replaces the earlier direct character transfer for beta-to-release mig
 3. Double-click **WoW-Addon-Backup.command**.
 4. Select **1 – Create / update backup**.
 5. Select the beta installation and template character. The current defaults are `_classic_beta_` and `Cannot Hotalot`; you can select a different character.
-6. Type `YES` to confirm that WoW has closed. Wait for **Backup verified**.
+6. Press Enter (or type `y`) at **Have you quit WoW completely? [Y/n]:** to confirm that WoW has closed; `n` cancels. Wait for **Backup verified**.
 
-Every run creates a new full ZIP snapshot in `Backups`. `latest.json` points to the newest successful backup. Earlier snapshots are not overwritten. Settings changes and newly installed addon files are read again during each backup. If a new configuration has no reviewed import adapter, the tool reports it during backup; have that message reviewed before release.
+Every run creates a new full ZIP snapshot in `Backups`. Filenames include the timestamp, full character name, and realm, for example `20261014-161319-002099_Cannot-Hotalot_Classic-Beta-PvP-2.zip`. Spaces and filename-unsafe characters are replaced with hyphens; Unicode letters are preserved. Existing backups keep their original names and remain supported. `latest.json` points to the newest successful backup. Earlier snapshots are not overwritten. Settings changes and newly installed addon files are read again during each backup. If a new configuration has no reviewed import adapter, the tool reports it during backup; have that message reviewed before release.
 
 You can then copy the entire tool directory to another drive. Restoration no longer requires the original beta installation.
 
@@ -52,7 +52,7 @@ The extra login provides reliable identity detection. A numeric realm directory 
 
 Quest progress, bag/equipment data, gold, guide progress, and other known ongoing character data are not copied from the beta character during import. They remain in the full raw backup but are omitted from the settings import or replaced with existing destination data.
 
-Action bar spells and other server-side character data are not created by this process. Macro files are not imported automatically. For a different class, spells, macro-related bindings, and click-casting may require adjustments in the game. The GUI layout is transferred. EllesmereUI uses the saved active layout; automatic beta specialization switching is reset during import.
+Action bar spells and other server-side character data are not created by this process. Macro files are included in backups and can be restored separately using menu option 5. For a different class, spells, macro-related bindings, and click-casting may require adjustments in the game. The GUI layout is transferred. EllesmereUI uses the saved active layout; automatic beta specialization switching is reset during import.
 
 ## Release compatibility limits
 
@@ -73,3 +73,22 @@ Select **4 – Verify backup** to check the stored checksums of every archived f
 ## Command-line usage
 
 `wow_backup.py` also provides `backup`, `verify`, `prepare`, `restore`, and `undo` commands. Without `--apply`, `prepare` and `restore` only show a preview. CLI operations that write files require `--closed`, confirming that WoW has been fully closed. For `prepare`, the explicit `--replace-addons` option replaces existing addon versions with the archived files. The normal menu keeps existing versions.
+
+## Transferring macros between characters
+
+1. Log in with the source character so its macros are saved locally, then quit WoW completely.
+2. Use **1 – Create / update backup** and select that source character. Full backups already include character and account macro files; existing snapshots can also be used if they contain those files.
+3. Log in once with the destination character, then quit WoW completely.
+4. Select **5 – Restore macros to another character**, choose the snapshot, destination installation, and destination character.
+5. Choose `character` (default), `account`, or `both`. Account macros are shared by every character on that account.
+6. Review the destination paths and macro counts. Press Enter (or type `y`) to confirm WoW is closed, then type `RESTORE` to apply.
+
+This replaces the complete macro file in each selected scope; it does not merge lists. Missing source files leave the corresponding destination unchanged. Existing destination files are backed up and can be restored through **3 – Undo recent changes**. The normal addon/UI restore leaves macros unchanged.
+
+Macro names, icons, identifiers, and bodies are preserved exactly. Explicit character names, spell names, and class-specific commands are not rewritten automatically: check them in the game. Action bar placement is not restored by the macro transfer. Offline file copying and undo are tested; live client/server macro synchronization and future release compatibility still need an in-game check after login.
+
+CLI preview (add `--apply --closed` to write):
+
+```sh
+python3 -B wow_backup.py restore-macros --backup /path/to/snapshot.zip --client /path/to/client --character /path/to/client/WTF/Account/ACCOUNT/REALM/CHARACTER --macro-scope character
+```
