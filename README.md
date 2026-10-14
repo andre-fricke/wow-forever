@@ -1,11 +1,11 @@
 # WoW Forever
 
-Werkzeuge für die lokale WoW-Forever-Installation.
+Tools for the local WoW Forever installation.
 
-## Addon-Backup
+## Addon backup
 
-Das Werkzeug unter [`tools/addon-backup`](tools/addon-backup/README.md) sichert Addons und UI-Einstellungen und bereitet ihre Übernahme von der Beta auf einen neuen Release-Charakter vor.
+The tool in [`tools/addon-backup`](tools/addon-backup/README.md) backs up addons and UI settings and prepares their migration from beta to a new release character.
 
-Start unter macOS: `tools/addon-backup/WoW-Addon-Backup.command` im Finder doppelklicken.
+On macOS, double-click `tools/addon-backup/WoW-Addon-Backup.command` in Finder.
 
-Persönliche Backups und Rücksicherungen liegen lokal beim Werkzeug und sind von Git ausgeschlossen. Ein Clone enthält ausschließlich den Programmcode, Dokumentation und Tests.
+Personal backups and recovery data are stored locally alongside the tool and excluded from Git. A clone contains only source code, documentation, and tests.

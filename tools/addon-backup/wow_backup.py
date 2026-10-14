@@ -21,7 +21,9 @@ from lua_saved import Lua
 HERE = Path(__file__).resolve().parent
 DEFAULT_CLIENT = Path('/Applications/World of Warcraft/_classic_beta_')
 SNAPSHOTS = HERE / 'Backups'
-RECOVERY = HERE / 'Ruecksicherungen'
+RECOVERY = HERE / 'Recovery'
+# Read earlier recovery folders without changing their contents.
+LEGACY_RECOVERY = HERE / 'Ruecksicherungen'
 HELPER = 'WoWUITransferIdentity'
 SCHEMA = 1
 
@@ -55,7 +57,7 @@ def dump(roots):
         if v is None:return 'nil'
         if isinstance(v,bool):return 'true' if v else 'false'
         if isinstance(v,(int,float)) and math.isfinite(v):return repr(v)
-        raise ValueError('Nicht unterstützter Lua-Wert')
+        raise ValueError('Unsupported Lua value')
     data=encode('\n'.join(k+' = '+value(v) for k,v in roots.items())+'\n')
     parse(data)
     return data
@@ -81,17 +83,17 @@ def json_write(path,value):
 
 def valid_relative(name):
     p=PurePosixPath(name)
-    if p.is_absolute() or '..' in p.parts or not p.parts:raise ValueError('Unsicherer Archivpfad: '+name)
+    if p.is_absolute() or '..' in p.parts or not p.parts:raise ValueError('Unsafe archive path: '+name)
     return p
 
 def rooted(root,relative):
     valid_relative(relative)
     p=root/relative
-    if not p.resolve().is_relative_to(root.resolve()):raise ValueError('Pfad verlässt den Zielordner: '+relative)
+    if not p.resolve().is_relative_to(root.resolve()):raise ValueError('Path leaves the destination directory: '+relative)
     # Reject symlinks, including ones that still point inside the client.
     cur=p
     while cur!=root:
-        if cur.is_symlink():raise ValueError('Symlink im Zielpfad: '+str(cur))
+        if cur.is_symlink():raise ValueError('Symlink in destination path: '+str(cur))
         cur=cur.parent
     return p
 
@@ -163,30 +165,30 @@ def audit_support(client,char):
     for p in files:
         d=parse(p.read_bytes())
         if p.stem not in REVIEWED and not p.stem.startswith(('EllesmereUI','DBM-')) and not all(isinstance(v,dict) and 'profileKeys' in v for v in d.values()):
-            unsupported.append('Kontodatei: '+p.name)
+            unsupported.append('Account file: '+p.name)
     for p in (char/'SavedVariables').glob('*.lua'):
         if p.stem not in installed and not p.stem.startswith('Blizzard_'):continue
         if p.stem not in CHAR_CONFIG|CHAR_SPECIAL|CHAR_BLIZZARD_RUNTIME and p.stem!=HELPER:
-            unsupported.append('Charakterdatei: '+p.name)
+            unsupported.append('Character file: '+p.name)
     return unsupported
 
 def create_backup(client,char):
     client=client.resolve();char=char.resolve()
-    if char not in [p.resolve() for p in characters(client)]:raise ValueError('Charakter gehört nicht zur ausgewählten Installation')
+    if char not in [p.resolve() for p in characters(client)]:raise ValueError('Character does not belong to the selected installation')
     info=identity(char)
-    if not info:raise ValueError('Vorlagen-Identität fehlt. Zuerst Charaktererkennung vorbereiten und mit der Vorlage einloggen.')
+    if not info:raise ValueError('Template identity is missing. Prepare character detection and log in with the template character first.')
     installed=inventory(client/'Interface/AddOns')
     unsupported=audit_support(client,char)
     SNAPSHOTS.mkdir(parents=True,exist_ok=True)
     dest=SNAPSHOTS/(stamp()+'.zip'); temp=dest.with_suffix('.partial')
     members={}; roots=[client/'Interface/AddOns',client/'WTF']
-    print('Sichere Addon-Dateien und alle lokal gespeicherten WTF-Einstellungen …',flush=True)
+    print('Backing up addon files and all locally saved WTF settings …',flush=True)
     try:
         with zipfile.ZipFile(temp,'w',zipfile.ZIP_DEFLATED,compresslevel=4) as z:
             count=0
             for root in roots:
                 for p in sorted(root.rglob('*')):
-                    if p.is_symlink():raise ValueError('Symlink muss vor dem Backup geprüft werden: '+str(p))
+                    if p.is_symlink():raise ValueError('Review this symlink before creating a backup: '+str(p))
                     if not p.is_file():continue
                     before=p.stat();rel=p.relative_to(client).as_posix()
                     digest=hashlib.sha256()
@@ -194,18 +196,18 @@ def create_backup(client,char):
                         for block in iter(lambda:src.read(1024*1024),b''):
                             digest.update(block);dst.write(block)
                     after=p.stat()
-                    if (before.st_mtime_ns,before.st_size)!=(after.st_mtime_ns,after.st_size):raise ValueError('Datei wurde während des Backups geändert. WoW beenden und wiederholen.')
+                    if (before.st_mtime_ns,before.st_size)!=(after.st_mtime_ns,after.st_size):raise ValueError('A file changed during the backup. Quit WoW and try again.')
                     members['client/'+rel]={'sha256':digest.hexdigest(),'size':after.st_size,'mtime_ns':after.st_mtime_ns}
                     count+=1
-                    if count%3000==0:print(f'{count} Dateien gesichert …',flush=True)
+                    if count%3000==0:print(f'{count} files backed up …',flush=True)
             manifest={'schema':SCHEMA,'created':dt.datetime.now().astimezone().isoformat(),'source_client':str(client),'source_character':char.relative_to(client).as_posix(),'source_identity':info,'addons':installed,'unsupported':unsupported,'files':members}
             z.writestr('manifest.json',json.dumps(manifest,ensure_ascii=False,indent=2))
         # Check content integrity before publishing the new current backup.
         verify_backup(temp)
         os.replace(temp,dest)
         json_write(HERE/'latest.json',{'backup':dest.relative_to(HERE).as_posix()})
-        print(f'Backup geprüft: {dest}\n{len(members)} Dateien, {dest.stat().st_size//1024//1024} MiB komprimiert.')
-        if unsupported:print('Vor einer Wiederherstellung noch zu prüfen: '+', '.join(unsupported))
+        print(f'Backup verified: {dest}\n{len(members)} files, {dest.stat().st_size//1024//1024} MiB compressed.')
+        if unsupported:print('Review before restoring: '+', '.join(unsupported))
         return dest
     except BaseException:
         temp.unlink(missing_ok=True)
@@ -214,17 +216,17 @@ def create_backup(client,char):
 def verify_backup(path):
     with zipfile.ZipFile(path) as z:
         names=z.namelist()
-        if len(names)!=len(set(names)):raise ValueError('Doppelte Archivpfade')
+        if len(names)!=len(set(names)):raise ValueError('Duplicate archive paths')
         manifest=json.loads(z.read('manifest.json'))
-        if manifest.get('schema')!=SCHEMA:raise ValueError('Unbekannte Backup-Version')
+        if manifest.get('schema')!=SCHEMA:raise ValueError('Unknown backup version')
         expected=set(manifest['files'])|{'manifest.json'}
-        if set(names)!=expected:raise ValueError('Archiv-Inhalt stimmt nicht mit dem Manifest überein')
+        if set(names)!=expected:raise ValueError('Archive contents do not match the manifest')
         for name,meta in manifest['files'].items():
             valid_relative(name)
             h=hashlib.sha256();size=0
             with z.open(name) as f:
                 for block in iter(lambda:f.read(1024*1024),b''):h.update(block);size+=len(block)
-            if h.hexdigest()!=meta['sha256'] or size!=meta['size']:raise ValueError('Beschädigte Backup-Datei: '+name)
+            if h.hexdigest()!=meta['sha256'] or size!=meta['size']:raise ValueError('Corrupted backup file: '+name)
         return manifest
 
 @dataclass
@@ -252,58 +254,64 @@ def apply_plan(client,plan,label):
     client=client.resolve(); changes={}
     for rel,value in plan.items():
         p=rooted(client,rel)
-        if p.exists() and not p.is_file():raise ValueError('Ziel ist keine Datei: '+str(p))
+        if p.exists() and not p.is_file():raise ValueError('Destination is not a file: '+str(p))
         before=file_sha(p); after=payload_hash(value)
         if before!=after:changes[rel]=(value,before,after)
-    if not changes:print('Keine Änderungen erforderlich.');return None
+    if not changes:print('No changes required.');return None
     dest=RECOVERY/stamp();dest.mkdir(parents=True)
     log={'schema':1,'client':str(client),'label':label,'status':'preparing','files':[]}
-    with zipfile.ZipFile(dest/'vorher.zip','w',zipfile.ZIP_DEFLATED) as z:
+    with zipfile.ZipFile(dest/'before.zip','w',zipfile.ZIP_DEFLATED) as z:
         for rel,(value,before,after) in changes.items():
             p=rooted(client,rel)
             if before is not None:
                 z.write(p,rel)
-                if file_sha(p)!=before:raise ValueError('Zieldatei wurde gleichzeitig geändert: '+rel)
+                if file_sha(p)!=before:raise ValueError('Destination file changed concurrently: '+rel)
             log['files'].append({'path':rel,'before':before,'after':after})
     # Verify the rollback data before writing any destination files.
-    with zipfile.ZipFile(dest/'vorher.zip') as z:
+    with zipfile.ZipFile(dest/'before.zip') as z:
         for entry in log['files']:
-            if entry['before'] is not None and sha(z.read(entry['path']))!=entry['before']:raise ValueError('Rücksicherung konnte nicht geprüft werden')
+            if entry['before'] is not None and sha(z.read(entry['path']))!=entry['before']:raise ValueError('Could not verify recovery data')
     log['status']='applying';json_write(dest/'manifest.json',log)
     done=[]
     try:
         for rel,(value,before,after) in changes.items():
             p=rooted(client,rel)
-            if file_sha(p)!=before:raise ValueError('Zieldatei wurde gleichzeitig geändert: '+rel)
+            if file_sha(p)!=before:raise ValueError('Destination file changed concurrently: '+rel)
             if value is None:p.unlink()
             else:atomic_payload(p,value)
             done.append(rel)
-            if file_sha(p)!=after:raise ValueError('Schreibprüfung fehlgeschlagen: '+rel)
-            if len(done)%3000==0:print(f'{len(done)} Dateien installiert …',flush=True)
+            if file_sha(p)!=after:raise ValueError('Write verification failed: '+rel)
+            if len(done)%3000==0:print(f'{len(done)} files installed …',flush=True)
         log['status']='complete';json_write(dest/'manifest.json',log)
     except BaseException:
-        with zipfile.ZipFile(dest/'vorher.zip') as z:
+        with zipfile.ZipFile(dest/'before.zip') as z:
             for rel in reversed(done):
                 p=rooted(client,rel)
                 if changes[rel][1] is None:p.unlink(missing_ok=True)
                 else:atomic_payload(p,z.read(rel))
         log['status']='rolled_back';json_write(dest/'manifest.json',log)
         raise
-    print(f'{len(changes)} Dateien geschrieben und geprüft. Rücksicherung: {dest}')
+    print(f'{len(changes)} files written and verified. Recovery data: {dest}')
     return dest
+
+def recovery_entries():
+    return sorted((p for root in [RECOVERY, LEGACY_RECOVERY] for p in root.glob('*')
+                   if (p/'manifest.json').exists()), key=lambda p:p.name, reverse=True)
 
 def undo(recovery):
     log=json.loads((recovery/'manifest.json').read_text());client=Path(log['client'])
-    if log['status'] not in ['complete','applying']:raise ValueError('Dieser Vorgang ist nicht wiederherstellbar: '+log['status'])
+    if log['status'] not in ['complete','applying']:raise ValueError('This operation cannot be undone: '+log['status'])
     plan={}
-    with zipfile.ZipFile(recovery/'vorher.zip') as z:
+    archive=recovery/'before.zip'
+    if not archive.exists():archive=recovery/'vorher.zip'  # Legacy archive name.
+    with zipfile.ZipFile(archive) as z:
         for e in log['files']:
             p=rooted(client,e['path']);current=file_sha(p)
-            if current not in [e['before'],e['after']]:raise ValueError('Datei wurde später geändert; Rücksicherung würde neuere Daten überschreiben: '+e['path'])
+            if current not in [e['before'],e['after']]:raise ValueError('File changed after this operation; undo would overwrite newer data: '+e['path'])
             data=z.read(e['path']) if e['before'] is not None else None
-            if data is not None and sha(data)!=e['before']:raise ValueError('Rücksicherung beschädigt')
+            if data is not None and sha(data)!=e['before']:raise ValueError('Recovery data is corrupted')
             plan[e['path']]=data
-    result=apply_plan(client,plan,'Rückgängig: '+log['label'])
+    result=apply_plan(client,plan,'Undo: '+log['label'])
     log['status']='undone';json_write(recovery/'manifest.json',log)
     return result
 
@@ -323,7 +331,7 @@ def remap(value,mapping):
         # A copied source entry takes precedence over a pre-existing target-name entry in the snapshot.
         for k,v in sorted(value.items(),key=lambda item: item[0] in mapping):
             nk=mapping.get(k,k)
-            if nk in out and k not in mapping:raise ValueError('Mehrdeutige Schlüssel-Zuordnung')
+            if nk in out and k not in mapping:raise ValueError('Ambiguous key mapping')
             out[nk]=remap(v,mapping)
         return out
     v=scalar(value)
@@ -425,7 +433,7 @@ def character_config(name,data,target_data,source,target):
         root=out.setdefault('_detalhes_database',{})
         for k in ['active_profile','local_instances_config','window_scale']:
             if k in src.get('_detalhes_database',{}):root[k]=copy.deepcopy(src['_detalhes_database'][k])
-    else:raise ValueError('Charakterdatei benötigt einen Adapter: '+name)
+    else:raise ValueError('Character file requires an adapter: '+name)
     return dump(remap(out,mapping))
 
 UI_CVAR=re.compile(r'^(?:uiScale$|useUiScale$|Brightness$|Contrast$|Gamma$|nameplate|raidFrames|damageMeter|showQuestLevel$|chat|floatingCombatText|UnitName|unitName|showTarget|showParty|showArena|colorblind|colorBlind|profanityFilter|buffDurations$|showCastableBuffs$|showDispelDebuffs$|statusText|displaySpellActivationOverlays$)',re.I)
@@ -509,16 +517,16 @@ def activation_data(z,manifest,installed,helper_enabled=False):
 
 def restore_plan(archive,manifest,client,char):
     target=identity(char)
-    if not target:raise ValueError('Zielidentität noch unbekannt. Erst Vorbereitung und Erkennungs-Login durchführen.')
+    if not target:raise ValueError('Target identity is unknown. Complete preparation and log in for character detection first.')
     source=manifest['source_identity'];account=char.parent.parent
-    if manifest['unsupported']:raise ValueError('Backup enthält noch nicht geprüfte Konfigurationen: '+', '.join(manifest['unsupported']))
+    if manifest['unsupported']:raise ValueError('Backup contains configurations that still need review: '+', '.join(manifest['unsupported']))
     expected=set(manifest['addons']);actual=inventory(client/'Interface/AddOns')
     missing=expected-set(actual)
-    if missing:raise ValueError('Addon-Dateien fehlen; zuerst vorbereiten: '+', '.join(sorted(missing)))
+    if missing:raise ValueError('Addon files are missing; run preparation first: '+', '.join(sorted(missing)))
     plan={};notes=[]
     for addon in expected & set(actual):
-        if manifest['addons'][addon].get('Version')!=actual[addon].get('Version'):notes.append('Andere Addon-Version bleibt erhalten: '+addon)
-    if source['class']!=target['class']:notes.append('Andere Klasse: '+source['class']+' → '+target['class']+'. Zauber und Click-Casting benötigen ggf. eine Anpassung im Spiel.')
+        if manifest['addons'][addon].get('Version')!=actual[addon].get('Version'):notes.append('Keeping a different installed addon version: '+addon)
+    if source['class']!=target['class']:notes.append('Different class: '+source['class']+' → '+target['class']+'. Spells and click-casting may need adjustment in the game.')
     srcchar='client/'+manifest['source_character'];srcacc=str(PurePosixPath(srcchar).parent.parent)
     def put(path,data):
         if data is not None and (not path.exists() or path.read_bytes()!=data):plan[path.relative_to(client).as_posix()]=data
@@ -552,33 +560,33 @@ def latest_backup():
         candidate=rooted(HERE,json.loads(p.read_text())['backup'])
         if candidate.is_file():return candidate
     candidates=sorted(SNAPSHOTS.glob('*.zip'))
-    if not candidates:raise ValueError('Noch kein Backup vorhanden. Zuerst „Backup erstellen / aktualisieren“ wählen.')
+    if not candidates:raise ValueError('No backup found. Select "Create / update backup" first.')
     return candidates[-1]
 
 def choose_client(default=None,release=False):
     candidates=sorted(p for p in DEFAULT_CLIENT.parent.iterdir() if p.is_dir() and (p/'WTF').is_dir()) if DEFAULT_CLIENT.parent.exists() else []
-    print('\nWoW-Installation auswählen'+(' – den RELEASE-Client wählen:' if release else ':'))
+    print('\nSelect a WoW installation'+(' – choose the RELEASE client:' if release else ':'))
     for i,p in enumerate(candidates,1):print(f'{i}: {p}'+(' [Beta]' if 'beta' in p.name.lower() else ''))
-    print('Alternativ vollständigen Pfad zum Client-Ordner eingeben (enthält WTF und Interface).')
-    prompt='Auswahl'+(f' [Enter: {default}]' if default else '')+': '
+    print('Or enter the full path to the client directory (containing WTF and Interface).')
+    prompt='Selection'+(f' [Enter: {default}]' if default else '')+': '
     answer=input(prompt).strip()
     if not answer and default:client=Path(default)
     elif answer.isdigit() and 1<=int(answer)<=len(candidates):client=candidates[int(answer)-1]
     else:client=Path(answer.strip('"\'' )).expanduser()
-    if not (client/'WTF').is_dir():raise ValueError('Kein Client-WTF-Ordner gefunden. Erst mit diesem Client einmal einloggen und WoW beenden.')
+    if not (client/'WTF').is_dir():raise ValueError('Client WTF directory not found. Log in once using this client, then quit WoW.')
     return client.resolve()
 
 def choose_character(client,default=None):
     choices=characters(client)
-    if not choices:raise ValueError('Noch kein Charakterordner vorhanden. Charakter einmal einloggen und WoW vollständig beenden.')
-    print('\nZielcharakter / Vorlagencharakter:')
-    for i,p in enumerate(choices,1):print(f'{i}: {p.name.replace("-"," ",1)} | Ordner/Realm: {p.parent.name} | Account: {p.parent.parent.name}')
-    answer=input('Charaktername oder Nummer'+(f' [Enter: {default}]' if default else '')+': ').strip()
+    if not choices:raise ValueError('No character directory found. Log in with the character once, then quit WoW completely.')
+    print('\nTarget / template character:')
+    for i,p in enumerate(choices,1):print(f'{i}: {p.name.replace("-"," ",1)} | Directory/Realm: {p.parent.name} | Account: {p.parent.parent.name}')
+    answer=input('Character name or number'+(f' [Enter: {default}]' if default else '')+': ').strip()
     if not answer and default:answer=default
     if answer.isdigit() and 1<=int(answer)<=len(choices):return choices[int(answer)-1]
     matches=[p for p in choices if answer.casefold() in [p.name.casefold(),p.name.replace('-',' ',1).casefold()]]
     if len(matches)==1:return matches[0]
-    raise ValueError('Name nicht eindeutig gefunden. Bitte die Nummer auswählen.')
+    raise ValueError('Character name was not found or is ambiguous. Select its number instead.')
 
 def closed_prompt():
     # The explicit confirmation is also the fallback on systems that restrict process inspection.
@@ -586,61 +594,61 @@ def closed_prompt():
     result=subprocess.run(['/bin/ps','-axo','comm='],capture_output=True,text=True)
     if result.returncode==0:
         running=[line.strip() for line in result.stdout.splitlines() if 'World of Warcraft' in line and '/Contents/MacOS/' in line and 'Launcher' not in line and 'Helper' not in line]
-        if running:raise ValueError('WoW läuft noch. Bitte vollständig beenden und erneut starten.')
-    if input('WoW vollständig beendet? JA eingeben: ').strip().upper()!='JA':raise ValueError('Abgebrochen; keine Einstellungen eingespielt.')
+        if running:raise ValueError('WoW is still running. Quit it completely, then restart this tool.')
+    if input('Have you quit WoW completely? Type YES: ').strip().upper()!='YES':raise ValueError('Cancelled; no settings restored.')
 
 def choose_snapshot():
     current=latest_backup()
-    answer=input(f'Backup [Enter: {current.name}], oder vollständiger Pfad: ').strip()
+    answer=input(f'Backup [Enter: {current.name}], or enter a full path: ').strip()
     return Path(answer.strip('"\'' )).expanduser().resolve() if answer else current
 
 def menu():
-    print('WoW – Addon-Backup für Beta → Release\n')
-    print('1  Backup erstellen / aktualisieren\n2  Backup auf Release-Charakter einspielen\n3  Letzte Änderungen rückgängig machen\n4  Backup prüfen\n0  Beenden')
-    action=input('Auswahl: ').strip()
+    print('WoW – Addon Backup for Beta → Release\n')
+    print('1  Create / update backup\n2  Restore backup to a release character\n3  Undo recent changes\n4  Verify backup\n0  Exit')
+    action=input('Selection: ').strip()
     if action=='0':return
     if action=='1':
         client=choose_client(DEFAULT_CLIENT)
         char=choose_character(client,'Cannot Hotalot')
         closed_prompt()
         if not identity(char):
-            apply_plan(client,helper_plan(client,character=char),'Charaktererkennung für Backup vorbereiten')
-            print('WoW starten, mit der Vorlage einloggen und vollständig beenden. Falls nötig, das Addon „WoW UI Transfer Identity“ im AddOns-Menü aktivieren (ggf. Load out of date AddOns).')
-            input('Danach Enter drücken …');closed_prompt()
+            apply_plan(client,helper_plan(client,character=char),'Prepare character detection for backup')
+            print('Start WoW, log in with the template character, then quit completely. If needed, enable "WoW UI Transfer Identity" in the AddOns menu (and Load out of date AddOns).')
+            input('Press Enter when finished …');closed_prompt()
         create_backup(client,char)
     elif action=='2':
-        archive=choose_snapshot();print('Prüfe Backup …',flush=True);manifest=verify_backup(archive)
-        if manifest['unsupported']:raise ValueError('Vor dem Einspielen noch prüfen lassen: '+', '.join(manifest['unsupported']))
+        archive=choose_snapshot();print('Verifying backup …',flush=True);manifest=verify_backup(archive)
+        if manifest['unsupported']:raise ValueError('Review before restoring: '+', '.join(manifest['unsupported']))
         client=choose_client(release=True)
-        print('Vorbereitung: fehlende Addons werden aus dem Backup installiert. Bereits installierte Versionen bleiben erhalten.')
+        print('Preparation installs missing addons from the backup and keeps existing installed versions.')
         char=choose_character(client)
         closed_prompt()
-        apply_plan(client,install_plan(archive,manifest,client,character=char),'Addon-Dateien und Charaktererkennung vorbereiten')
+        apply_plan(client,install_plan(archive,manifest,client,character=char),'Prepare addon files and character detection')
         helper=char/'SavedVariables'/f'{HELPER}.lua'
         if not helper.exists():
-            print('\nBitte WoW starten, mit '+char.name.replace('-',' ',1)+' einloggen und WoW vollständig beenden.')
-            print('Die Charaktererkennung ermittelt dabei den neuen Realm und die neue GUID. Im AddOns-Menü muss „WoW UI Transfer Identity“ aktiv sein; ggf. „Load out of date AddOns“ aktivieren.')
-            input('Danach Enter drücken …');closed_prompt()
-        if not helper.exists():raise ValueError('Charaktererkennung wurde noch nicht gespeichert. Addon aktivieren, einloggen und WoW beenden; dann erneut Option 2 wählen.')
+            print('\nStart WoW, log in with '+char.name.replace('-',' ',1)+', then quit WoW completely.')
+            print('Character detection records the new realm and GUID. Enable "WoW UI Transfer Identity" in the AddOns menu; enable "Load out of date AddOns" if needed.')
+            input('Press Enter when finished …');closed_prompt()
+        if not helper.exists():raise ValueError('Character identity has not been saved yet. Enable the addon, log in, and quit WoW; then select option 2 again.')
         plan,notes,target=restore_plan(archive,manifest,client,char)
-        print(f'\nBackup: {manifest["created"]}\nVorlage: {manifest["source_identity"]["full"]}\nZiel: {target["full"]} – {target["realm"]}\nInstallation: {client}\n{len(plan)} Einstellungsdateien werden geändert.')
-        print('Kontoweite Addon-Profile, Layouts und Tastenzuweisungen gelten auch für andere Charaktere dieses Zielaccounts.')
+        print(f'\nBackup: {manifest["created"]}\nTemplate: {manifest["source_identity"]["full"]}\nTarget: {target["full"]} – {target["realm"]}\nInstallation: {client}\n{len(plan)} settings files will be changed.')
+        print('Account-wide addon profiles, layouts, and key bindings also affect other characters on the destination account.')
         for note in notes:print(note)
-        if input('WIEDERHERSTELLEN eingeben: ').strip()!='WIEDERHERSTELLEN':return
-        apply_plan(client,plan,'UI-Backup auf '+target['full']+' – '+target['realm'])
-        print('Fertig. WoW starten und die Darstellung prüfen. Die Charaktererkennung ist für diesen Charakter jetzt deaktiviert.')
+        if input('Type RESTORE: ').strip()!='RESTORE':return
+        apply_plan(client,plan,'Restore UI backup to '+target['full']+' – '+target['realm'])
+        print('Done. Start WoW and check the layout. Character detection is now disabled for this character.')
     elif action=='3':
-        choices=sorted([p for p in RECOVERY.glob('*') if (p/'manifest.json').exists()],reverse=True)
-        if not choices:raise ValueError('Keine Rücksicherung vorhanden.')
+        choices=recovery_entries()
+        if not choices:raise ValueError('No recovery data found.')
         for i,p in enumerate(choices,1):
             info=json.loads((p/'manifest.json').read_text());print(f'{i}: {p.name} – {info["label"]} [{info["status"]}]')
-        selected=choices[int(input('Nummer (bei mehreren Vorgängen zuletzt ausgeführten zuerst rückgängig machen): '))-1]
+        selected=choices[int(input('Number (undo the most recent operation first): '))-1]
         closed_prompt();undo(selected)
     elif action=='4':
         archive=choose_snapshot();manifest=verify_backup(archive)
-        print(f'Backup intakt: {len(manifest["files"])} Dateien, {len(manifest["addons"])} Addon-Ordner, erstellt {manifest["created"]}.')
-        if manifest['unsupported']:print('Noch zu prüfen: '+', '.join(manifest['unsupported']))
-    else:raise ValueError('Unbekannte Auswahl')
+        print(f'Backup is valid: {len(manifest["files"])} files, {len(manifest["addons"])} addon directories, created {manifest["created"]}.')
+        if manifest['unsupported']:print('Needs review: '+', '.join(manifest['unsupported']))
+    else:raise ValueError('Unknown selection')
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
@@ -648,41 +656,41 @@ def main():
     ap.add_argument('--client',type=Path);ap.add_argument('--character',type=Path)
     ap.add_argument('--backup',type=Path);ap.add_argument('--recovery',type=Path)
     ap.add_argument('--apply',action='store_true');ap.add_argument('--closed',action='store_true')
-    ap.add_argument('--replace-addons',action='store_true',help='Explizit auch vorhandene Addon-Versionen durch Backup-Versionen ersetzen')
+    ap.add_argument('--replace-addons',action='store_true',help='Also replace existing addon versions with versions from the backup')
     args=ap.parse_args()
     if args.action=='menu':return menu()
     if args.action=='backup':
-        if not args.closed:raise ValueError('Vor dem Backup WoW beenden und --closed angeben.')
-        if not args.client or not args.character:raise ValueError('--client und --character fehlen')
+        if not args.closed:raise ValueError('Quit WoW before backing up and specify --closed.')
+        if not args.client or not args.character:raise ValueError('--client and --character are required')
         return create_backup(args.client,args.character)
     if args.action=='undo':
-        if not args.closed or not args.recovery:raise ValueError('--closed und --recovery erforderlich')
+        if not args.closed or not args.recovery:raise ValueError('--closed and --recovery are required')
         return undo(args.recovery)
     archive=args.backup or latest_backup();manifest=verify_backup(archive)
     if args.action=='verify':
-        print(f'Backup intakt: {len(manifest["files"])} Dateien.');return
-    if not args.client:raise ValueError('--client fehlt')
+        print(f'Backup is valid: {len(manifest["files"])} files.');return
+    if not args.client:raise ValueError('--client is required')
     client=args.client.resolve()
     if args.action=='prepare':
-        if not args.character:raise ValueError('--character fehlt')
+        if not args.character:raise ValueError('--character is required')
         char=args.character.resolve()
-        if char not in [p.resolve() for p in characters(client)]:raise ValueError('Charakter gehört nicht zum Zielclient')
+        if char not in [p.resolve() for p in characters(client)]:raise ValueError('Character does not belong to the destination client')
         plan=install_plan(archive,manifest,client,args.replace_addons,character=char)
     else:
-        if not args.character:raise ValueError('--character fehlt')
+        if not args.character:raise ValueError('--character is required')
         char=args.character.resolve()
-        if char not in [p.resolve() for p in characters(client)]:raise ValueError('Zielcharakter gehört nicht zum Zielclient')
+        if char not in [p.resolve() for p in characters(client)]:raise ValueError('Target character does not belong to the destination client')
         plan,notes,target=restore_plan(archive,manifest,client,char)
         for note in notes:print(note)
-        print('Ziel:',target['full'],target['realm'])
-    print(f'Plan: {len(plan)} Dateien. '+('Anwendung folgt.' if args.apply else 'Nur Vorschau, keine Änderungen.'))
+        print('Target:',target['full'],target['realm'])
+    print(f'Plan: {len(plan)} files. '+('Applying changes next.' if args.apply else 'Preview only; no changes.'))
     if args.apply:
-        if not args.closed:raise ValueError('Vor dem Anwenden WoW beenden und --closed angeben.')
+        if not args.closed:raise ValueError('Quit WoW before applying changes and specify --closed.')
         return apply_plan(client,plan,args.action)
 
 if __name__=='__main__':
     try:main()
     except (ValueError,OSError,KeyError,IndexError,zipfile.BadZipFile) as error:
-        print('\nAbgebrochen: '+str(error),file=sys.stderr);sys.exit(1)
+        print('\nCancelled: '+str(error),file=sys.stderr);sys.exit(1)
     except KeyboardInterrupt:
-        print('\nAbgebrochen.',file=sys.stderr);sys.exit(130)
+        print('\nCancelled.',file=sys.stderr);sys.exit(130)

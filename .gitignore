@@ -5,5 +5,7 @@ __pycache__/
 
 # Local snapshots and restore data can contain private account/character information.
 /tools/addon-backup/Backups/
+/tools/addon-backup/Recovery/
+# Older recovery directories remain private and readable.
 /tools/addon-backup/Ruecksicherungen/
 /tools/addon-backup/latest.json
