@@ -71,7 +71,7 @@ def test_legacy_recovery(tmp):
   w.undo(old)
   assert (client/'settings').read_text()=='original'
   entries=w.recovery_entries()
-  assert len(entries)==2 and entries[0].parent==w.RECOVERY and entries[1]==old
+  assert len(entries)==2 and entries[0].is_relative_to(w.RECOVERY) and entries[1]==old
  finally:
   w.RECOVERY,w.LEGACY_RECOVERY=recovery,legacy
  print('PASS English recovery archives and legacy recovery discovery/undo')

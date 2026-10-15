@@ -10,7 +10,7 @@ import wow_backup as w
 with patch('builtins.input',side_effect=['1','1','1','3','0']), \
      patch.object(w,'choose_client',return_value=Path('/test/client')), \
      patch.object(w,'choose_character',return_value=Path('/test/character')), \
-     patch.object(w,'closed_prompt'), patch.object(w,'identity',return_value={'name':'Test'}), \
+     patch.object(w,'wait_for_wow_closed'), patch.object(w,'identity',return_value={'name':'Test'}), \
      patch.object(w,'create_backup') as backup, \
      patch.object(w,'choose_snapshot',return_value=Path('/test/snapshot.zip')), \
      patch.object(w,'verify_backup',return_value={'files':{},'addons':{},'created':'test','unsupported':[]}) as verify, \
@@ -33,22 +33,15 @@ with patch('builtins.input',side_effect=EOFError()), redirect_stdout(io.StringIO
     assert output.getvalue().count('0  Exit')==1
 print('PASS repeated menu actions, explicit exit, recoverable errors, interruption and EOF')
 
-# Returning from undo must never select an entry, including through negative indexing.
-for answer in ('0','','  ','-1','2','invalid','1'):
-    entry=Path('/test/recovery/entry')
-    with patch('builtins.input',side_effect=['3','1',answer,'0']), \
-         patch.object(w,'recovery_entries',return_value=[entry]), \
-         patch.object(Path,'read_text',return_value='{"label":"Test restore","status":"complete"}'), \
-         patch.object(w,'closed_prompt') as closed, patch.object(w,'undo') as undo, \
-         redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
+# A cancelled recovery selection never runs undo or asks to close WoW.
+for selected in (None,Path('/test/recovery/entry')):
+    with patch('builtins.input',side_effect=['3','1','0']), \
+         patch.object(w,'choose_recovery',return_value=selected), \
+         patch.object(w,'wait_for_wow_closed') as closed,patch.object(w,'undo') as undo, \
+         redirect_stdout(io.StringIO()):
         w.menu()
-        assert '0: Back to main menu' in output.getvalue()
-        assert output.getvalue().count('0  Exit')==2
-        if answer=='1':
-            closed.assert_called_once();undo.assert_called_once_with(entry)
-        else:
-            closed.assert_not_called();undo.assert_not_called()
-print('PASS undo return, empty input, invalid indices and explicit selection')
+        if selected is None:closed.assert_not_called();undo.assert_not_called()
+        else:closed.assert_called_once();undo.assert_called_once_with(selected)
 
 # Both nested menus support a no-action return.
 for answers in (['1','0','0'],['2','','0'],['3','0','0']):
@@ -59,7 +52,7 @@ for answers in (['1','0','0'],['2','','0'],['3','0','0']):
 with patch('builtins.input',side_effect=['1','2','0']), \
      patch.object(w,'choose_client',return_value=Path('/test/client')), \
      patch.object(w,'choose_character',return_value=Path('/test/character')), \
-     patch.object(w,'closed_prompt'), patch.object(w,'identity',return_value={'name':'Test'}), \
+     patch.object(w,'wait_for_wow_closed'), patch.object(w,'identity',return_value={'name':'Test'}), \
      patch.object(w,'create_backup') as backup, redirect_stdout(io.StringIO()):
     w.menu()
     backup.assert_called_once_with(Path('/test/client'),Path('/test/character'),kind='macros')
@@ -73,12 +66,9 @@ assert w.english_legacy_text('Undo: Rückgängig: UI-Backup auf Name')=='Undo: U
 assert w.english_legacy_text('Kontodatei: Example.lua')=='Account file: Example.lua'
 assert w.english_legacy_text('Charakterdatei: Example.lua')=='Character file: Example.lua'
 assert w.english_legacy_text('Restore macros to Name')=='Restore macros to Name'
-with patch('builtins.input',side_effect=['3','1','0','0']), \
-     patch.object(w,'recovery_entries',return_value=[Path('/test/recovery/entry')]), \
-     patch.object(Path,'read_text',return_value='{"label":"UI-Backup auf Miese Makrele","status":"complete"}'), \
-     patch.object(w,'undo') as undo, redirect_stdout(io.StringIO()) as output:
-    w.menu()
-    assert 'Restore UI backup to Miese Makrele' in output.getvalue()
-    assert 'UI-Backup auf' not in output.getvalue()
-    undo.assert_not_called()
+with patch.object(w,'recovery_entries',return_value=[Path('/test/recovery/entry')]), \
+     patch.object(Path,'read_text',return_value='{"label":"UI-Backup auf Miese Makrele","status":"complete","target":{"realm":"Realm","character":"Miese Makrele"}}'):
+    records=w.recovery_records()
+    assert 'Restore UI backup to Miese Makrele' in records[0]['label']
+    assert 'UI-Backup auf' not in records[0]['label']
 print('PASS English legacy labels and unchanged character names')

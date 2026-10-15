@@ -19,6 +19,12 @@ with tempfile.TemporaryDirectory() as td:
  write(char.parent.parent/'macros-cache.txt',b'account macros')
  first=w.create_backup(client,char)
  assert first.name.endswith('_Éowyn-Surname_Beta_combined.zip')
+ assert first.parent==w.SNAPSHOTS/'Beta'/'Éowyn_Surname'/'Combined'
+ assert (first.parent.parent/'Addons').is_dir() and (first.parent.parent/'Macros').is_dir()
+ assert w.backup_folder_part('Classic Beta PvP 2')=='Classic_Beta_PvP_2'
+ assert w.backup_folder_part('  Cannot  Hotalot\t')=='Cannot_Hotalot'
+ assert w.backup_folder_part('Realm / Test-PvP')=='Realm_Test_PvP'
+ assert '/' not in w.backup_folder_part('../Realm/Test')
  assert w.backup_name_part('Realm / Test: PvP 2')=='Realm-Test-PvP-2'
  assert len(w.backup_name_part('界'*100).encode())<=80
  write(char/'macros-cache.txt',b'character macros v2')
@@ -55,6 +61,15 @@ with tempfile.TemporaryDirectory() as td:
  # Separate backup types contain only their intended data.
  addon_backup=w.create_backup(client,char,kind='addons')
  macro_backup=w.create_backup(client,char,kind='macros')
+ assert addon_backup.parent==w.SNAPSHOTS/'Beta'/'Éowyn_Surname'/'Addons'
+ assert macro_backup.parent==w.SNAPSHOTS/'Beta'/'Éowyn_Surname'/'Macros'
+ assert json.loads((tool/'latest.json').read_text())['backup']==macro_backup.relative_to(tool).as_posix()
+ flat=w.SNAPSHOTS/'00000000-legacy.zip';flat.write_bytes(first.read_bytes())
+ other=w.SNAPSHOTS/'Zulu Realm'/'Other Character'/'Addons'/'00000001-old.zip'
+ write(other,addon_backup.read_bytes())
+ assert flat in w.backup_entries() and other in w.backup_entries()
+ (tool/'latest.json').unlink()
+ assert w.latest_backup()==macro_backup
  am=w.verify_backup(addon_backup);mm=w.verify_backup(macro_backup)
  assert am['kind']=='addons' and mm['kind']=='macros'
  assert not any(Path(n).name.startswith('macros-cache.') for n in am['files'])
@@ -75,5 +90,11 @@ with tempfile.TemporaryDirectory() as td:
  lm=w.verify_backup(legacy)
  w.require_backup_kind(lm,'addons');w.require_backup_kind(lm,'macros')
  assert len(w.macro_plan(legacy,lm,release,dst,'both')[0])==2
+ # A redirected realm directory must not write outside the backup tree.
+ (w.SNAPSHOTS/'Redirect').symlink_to(outside,target_is_directory=True)
+ try:w.backup_directory({'realm':'Redirect','full':'Test'},'addons')
+ except ValueError:pass
+ else:raise AssertionError('Backup destination symlink accepted')
+ assert not (outside/'Test').exists()
  w.HERE,w.SNAPSHOTS,w.RECOVERY=original
 print('PASS backup refresh/history, archive payload install, pre-login activation, undo, corruption and symlink checks')

@@ -4,12 +4,12 @@ Standalone macOS tool for versioned addon/UI backups and migration to a new char
 
 ## Getting started
 
-Double-click `WoW-Addon-Backup.command` in Finder. The Backup submenu offers separate addon and macro backups, verification, and backup deletion. The Restore submenu offers addon and macro restoration. The Recovery submenu offers undo and recovery point deletion. After each action, the tool returns to the main menu so you can create a backup and restore it in the same window. Choose **0 – Exit** to quit. Failed or cancelled actions also return to the menu. Quit WoW completely before creating a backup or importing settings.
+Double-click `WoW-Addon-Backup.command` in Finder. The Backup submenu offers separate addon and macro backups, verification, and backup deletion. The Restore submenu offers addon and macro restoration. The Recovery submenu offers undo and recovery point deletion. After each action, the tool returns to the main menu so you can create a backup and restore it in the same window. Choose **0 – Exit** to quit. Failed or cancelled actions also return to the menu. The interactive tool checks whether WoW is closed and, if necessary, waits up to 30 seconds with a countdown every five seconds. Quit WoW completely during that wait; if it remains open, the action is cancelled.
 
 - [User guide](GUIDE.md)
 - [Validation report](VALIDATION.md)
 
-A Git clone does not include personal backups. These are created in `Backups/`; `latest.json` points to the current snapshot. Recovery data is stored in `Recovery/`. These paths are deliberately excluded from Git. Older `Ruecksicherungen/` directories remain supported and excluded. Back up the entire tool directory, including these local files, separately.
+A Git clone does not include personal backups. These are created in `Backups/<Realm>/<Character>/Addons/` or `Macros/`; `latest.json` points to the current snapshot. Recovery data is stored in `Recovery/<Realm>/<Character>/<Timestamp>/`. Backup and recovery selection follows realm → character → file/point, with `0` or Enter to go back. These paths are deliberately excluded from Git. Older `Ruecksicherungen/` directories remain supported and excluded. Back up the entire tool directory, including these local files, separately.
 
 ## Tests
 
@@ -22,6 +22,8 @@ python3 -B tests/test_macros.py
 python3 -B tests/test_menu.py
 python3 -B tests/test_deletion.py
 python3 -B tests/test_portability.py
+python3 -B tests/test_browsing.py
+python3 -B tests/test_process_wait.py
 ```
 
 These tests create synthetic data in temporary directories and do not modify a WoW installation. They cover character mapping, Unicode, archives, backup updates, installation, recovery, and failure handling.

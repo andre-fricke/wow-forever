@@ -14,6 +14,8 @@ import re
 import shutil
 import sys
 import tempfile
+import time
+import subprocess
 import zipfile
 from dataclasses import dataclass
 from lua_saved import Lua
@@ -80,6 +82,23 @@ def backup_name_part(value):
     cleaned=''.join(c if c.isalnum() or c in ' -_' else '-' for c in value)
     cleaned=re.sub(r'[\s-]+','-',cleaned).strip('-_')
     return cleaned.encode('utf-8')[:80].decode('utf-8',errors='ignore').rstrip('-_') or 'Unknown'
+
+def backup_folder_part(value):
+    # Use underscores as separators, keeping Unicode letters and digits readable.
+    cleaned=''.join(c if c.isalnum() else '_' for c in value)
+    cleaned=re.sub(r'_+','_',cleaned).strip('_')
+    return cleaned.encode('utf-8')[:80].decode('utf-8',errors='ignore').rstrip('_') or 'Unknown'
+
+def backup_directory(info,kind):
+    rooted(HERE,SNAPSHOTS.relative_to(HERE).as_posix())
+    relative=backup_folder_part(info['realm'])+'/'+backup_folder_part(info['full'])
+    for folder in ('Addons','Macros'):
+        rooted(SNAPSHOTS,relative+'/'+folder).mkdir(parents=True,exist_ok=True)
+    folder={'addons':'Addons','macros':'Macros','combined':'Combined'}[kind]
+    destination=rooted(SNAPSHOTS,relative+'/'+folder)
+    destination.mkdir(parents=True,exist_ok=True)
+    return destination
+
 
 def json_write(path,value):
     path.parent.mkdir(parents=True,exist_ok=True)
@@ -186,9 +205,9 @@ def create_backup(client,char,kind="combined"):
     if not info:raise ValueError('Template identity is missing. Prepare character detection and log in with the template character first.')
     installed=inventory(client/'Interface/AddOns') if kind!='macros' else {}
     unsupported=audit_support(client,char) if kind!='macros' else []
-    SNAPSHOTS.mkdir(parents=True,exist_ok=True)
+    destination=backup_directory(info,kind)
     filename=stamp()+'_'+backup_name_part(info['full'])+'_'+backup_name_part(info['realm'])+'_'+kind+'.zip'
-    dest=SNAPSHOTS/filename; temp=dest.with_suffix('.partial')
+    dest=destination/filename; temp=dest.with_suffix('.partial')
     members={}; roots=[client/'Interface/AddOns',client/'WTF']
     macro_paths={char/'macros-cache.txt',char.parent.parent/'macros-cache.txt'}
     if kind=='macros':roots=[None]
@@ -266,7 +285,27 @@ def atomic_payload(path,value):
     finally:
         if os.path.exists(temp):os.unlink(temp)
 
-def apply_plan(client,plan,label):
+def recovery_context(client,files,character=None):
+    """Identify the destination of a recovery point, including older manifests."""
+    client=Path(client).resolve()
+    if character is None:
+        candidates=set()
+        for filename in files:
+            parts=PurePosixPath(filename).parts
+            if len(parts)>=6 and parts[:2]==('WTF','Account') and parts[3]!='SavedVariables':
+                candidates.add('/'.join(parts[:5]))
+        if len(candidates)==1:character=rooted(client,candidates.pop())
+    if character is None:return {'realm':'Unknown Realm','character':'Unassigned'}
+    character=Path(character).absolute()
+    relative=character.relative_to(client).as_posix()
+    rooted(client,relative)
+    try:info=identity(character) or {}
+    except (ValueError,OSError,KeyError,IndexError):info={}
+    realm=info.get('realm') or (('Realm folder '+character.parent.name) if character.parent.name.isdigit() else character.parent.name)
+    return {'realm':realm,'character':info.get('full') or character.name.replace('-',' ',1),'character_path':relative}
+
+
+def apply_plan(client,plan,label,character=None,context=None):
     client=client.resolve(); changes={}
     for rel,value in plan.items():
         p=rooted(client,rel)
@@ -274,8 +313,11 @@ def apply_plan(client,plan,label):
         before=file_sha(p); after=payload_hash(value)
         if before!=after:changes[rel]=(value,before,after)
     if not changes:print('No changes required.');return None
-    dest=RECOVERY/stamp();dest.mkdir(parents=True)
-    log={'schema':1,'client':str(client),'label':label,'status':'preparing','files':[]}
+    context=context or recovery_context(client,changes,character)
+    relative=backup_folder_part(context['realm'])+'/'+backup_folder_part(context['character'])+'/'+stamp()
+    if RECOVERY.is_symlink():raise ValueError('Recovery storage must not be a symlink.')
+    dest=rooted(RECOVERY,relative);dest.mkdir(parents=True)
+    log={'schema':1,'client':str(client),'target':context,'label':label,'status':'preparing','files':[]}
     with zipfile.ZipFile(dest/'before.zip','w',zipfile.ZIP_DEFLATED) as z:
         for rel,(value,before,after) in changes.items():
             p=rooted(client,rel)
@@ -332,8 +374,15 @@ def english_legacy_text(text):
 
 
 def recovery_entries():
-    return sorted((p for root in [RECOVERY, LEGACY_RECOVERY] for p in root.glob('*')
-                   if (p/'manifest.json').exists()), key=lambda p:p.name, reverse=True)
+    entries=[]
+    for root in (RECOVERY,LEGACY_RECOVERY):
+        if root.is_symlink():continue
+        for directory,folders,files in os.walk(root,followlinks=False):
+            folders[:]=[name for name in folders if not (Path(directory)/name).is_symlink()]
+            if 'manifest.json' in files and not (Path(directory)/'manifest.json').is_symlink():
+                entries.append(Path(directory));folders[:]=[]
+    return sorted(entries,key=lambda p:(p.name,str(p)),reverse=True)
+
 
 def undo(recovery):
     log=json.loads((recovery/'manifest.json').read_text());client=Path(log['client'])
@@ -348,7 +397,8 @@ def undo(recovery):
             data=z.read(e['path']) if e['before'] is not None else None
             if data is not None and sha(data)!=e['before']:raise ValueError('Recovery data is corrupted')
             plan[e['path']]=data
-    result=apply_plan(client,plan,'Undo: '+english_legacy_text(log['label']))
+    context=log.get('target') or recovery_context(client,(e['path'] for e in log['files']))
+    result=apply_plan(client,plan,'Undo: '+english_legacy_text(log['label']),context=context)
     log['status']='undone';json_write(recovery/'manifest.json',log)
     return result
 
@@ -635,7 +685,7 @@ def show_macro_notes(notes):
 
 def latest_backup(kind=None):
     if kind:
-        for candidate in sorted(SNAPSHOTS.glob('*.zip'),reverse=True):
+        for candidate in backup_entries():
             try:
                 with zipfile.ZipFile(candidate) as z:manifest=json.loads(z.read('manifest.json'))
             except (OSError,ValueError,KeyError,zipfile.BadZipFile):continue
@@ -645,22 +695,31 @@ def latest_backup(kind=None):
     if p.exists():
         candidate=rooted(HERE,json.loads(p.read_text())['backup'])
         if candidate.is_file():return candidate
-    candidates=sorted(SNAPSHOTS.glob('*.zip'))
+    candidates=backup_entries()
     if not candidates:raise ValueError('No backup found. Create one in the Backup menu first.')
-    return candidates[-1]
+    return candidates[0]
 
 def backup_entries():
-    return sorted((p for p in SNAPSHOTS.glob('*.zip') if p.is_file() and not p.is_symlink()),reverse=True)
+    rooted(HERE,SNAPSHOTS.relative_to(HERE).as_posix())
+    entries=[]
+    for directory,folders,files in os.walk(SNAPSHOTS,followlinks=False):
+        folders[:]=[name for name in folders if not (Path(directory)/name).is_symlink()]
+        for name in files:
+            path=Path(directory)/name
+            if path.suffix=='.zip' and path.is_file() and not path.is_symlink():entries.append(path)
+    # Timestamp-prefixed filenames determine age, not realm/character directory order.
+    return sorted(entries,key=lambda p:(p.name,p.as_posix()),reverse=True)
 
-def managed_entry(path,root):
-    """Allow deletion only of direct entries in the tool's own storage folders."""
+def managed_entry(path,root,nested=False):
+    """Allow deletion only inside the selected tool storage directory."""
     path=Path(path).absolute();root=Path(root).absolute()
-    if path.parent!=root:raise ValueError('Selection is outside the managed storage directory.')
+    if not path.is_relative_to(root) or path==root or (not nested and path.parent!=root):
+        raise ValueError('Selection is outside the managed storage directory.')
     rooted(HERE,root.relative_to(HERE.absolute()).as_posix())
-    return rooted(root,path.name)
+    return rooted(root,path.relative_to(root).as_posix())
 
 def delete_backup(path):
-    path=managed_entry(path,SNAPSHOTS)
+    path=managed_entry(path,SNAPSHOTS,nested=True)
     if path.suffix!='.zip' or not path.is_file():raise ValueError('Select an existing backup ZIP.')
     pointer=HERE/'latest.json'
     # Resolve the pointer before deleting, so invalid metadata causes no partial deletion.
@@ -674,9 +733,9 @@ def delete_backup(path):
 
 def delete_recovery_point(path):
     path=Path(path).absolute()
-    roots=[root for root in (RECOVERY,LEGACY_RECOVERY) if path.parent==root.absolute()]
+    roots=[root for root in (RECOVERY,LEGACY_RECOVERY) if path!=root.absolute() and path.is_relative_to(root.absolute())]
     if not roots:raise ValueError('Selection is outside the recovery directories.')
-    path=managed_entry(path,roots[0])
+    path=managed_entry(path,roots[0],nested=True)
     if not path.is_dir() or not (path/'manifest.json').is_file():
         raise ValueError('Select an existing recovery point.')
     # rmtree removes internal symlinks themselves without following their targets.
@@ -684,24 +743,8 @@ def delete_recovery_point(path):
     print('Recovery point deleted: '+path.name)
 
 def deletion_menu(recovery=False):
-    choices=recovery_entries() if recovery else backup_entries()
-    if not choices:
-        print('No recovery points found.' if recovery else 'No backups found.')
-        return
-    for i,path in enumerate(choices,1):
-        label=''
-        if recovery:
-            try:
-                info=json.loads((path/'manifest.json').read_text())
-                label=' – '+english_legacy_text(info['label'])+' ['+info['status']+']'
-            except (ValueError,KeyError,OSError):label=' – unreadable recovery metadata'
-        print(f'{i}: {path.parent.name}/{path.name}{label}')
-    print('0: Back to main menu')
-    answer=input('Number to delete [Enter: back]: ').strip()
-    if answer in ('','0'):return
-    if not answer.isdecimal() or not 1<=int(answer)<=len(choices):
-        raise ValueError('Invalid deletion selection')
-    selected=choices[int(answer)-1]
+    selected=choose_recovery() if recovery else choose_snapshot()
+    if selected is None:return
     print('Selected: '+str(selected))
     print('Deleting this recovery point permanently removes its undo data.' if recovery else 'Deleting this backup permanently removes this snapshot. Recovery points are kept.')
     if input('Permanently delete this item? [y/N]: ').strip().lower() not in ('y','yes'):
@@ -735,19 +778,104 @@ def choose_character(client):
     if len(matches)==1:return matches[0]
     raise ValueError('Character name was not found or is ambiguous. Select its number instead.')
 
-def closed_prompt():
-    # The explicit confirmation is also the fallback on systems that restrict process inspection.
-    import subprocess
-    result=subprocess.run(['/bin/ps','-axo','comm='],capture_output=True,text=True)
-    if result.returncode==0:
-        running=[line.strip() for line in result.stdout.splitlines() if 'World of Warcraft' in line and '/Contents/MacOS/' in line and 'Launcher' not in line and 'Helper' not in line]
-        if running:raise ValueError('WoW is still running. Quit it completely, then restart this tool.')
-    if input('Have you quit WoW completely? [Y/n]: ').strip().lower() not in ('','y','yes'):raise ValueError('Cancelled; no settings restored.')
+def wow_is_running():
+    try:
+        result=subprocess.run(['/bin/ps','-axo','comm='],capture_output=True,text=True,timeout=2)
+    except (OSError,subprocess.TimeoutExpired) as error:
+        raise ValueError('Could not check whether WoW is running. Try again before modifying files.') from error
+    if result.returncode!=0:
+        raise ValueError('Could not check whether WoW is running. Try again before modifying files.')
+    return any('World of Warcraft' in line and '/Contents/MacOS/' in line
+               and 'Launcher' not in line and 'Helper' not in line
+               for line in result.stdout.splitlines())
+
+def wait_for_wow_closed():
+    if not wow_is_running():
+        print('WoW is closed. Continuing.',flush=True)
+        return
+    print('WoW is still running. Quit WoW completely; waiting up to 30 seconds …',flush=True)
+    deadline=time.monotonic()+30
+    countdown=30
+    while True:
+        remaining=deadline-time.monotonic()
+        while countdown>=max(0,math.ceil(remaining)):
+            print(f'{countdown} seconds remaining …',flush=True)
+            countdown-=5
+        if remaining<=0:
+            raise ValueError('WoW is still running after 30 seconds. Quit WoW and select the action again.')
+        # Check every second; display the countdown every five seconds.
+        time.sleep(min(1,remaining))
+        if not wow_is_running():
+            print('WoW has closed. Continuing.',flush=True)
+            return
+
+
+def select_number(title,labels):
+    while True:
+        print('\n'+title)
+        for index,label in enumerate(labels,1):print(f'{index}: {label}')
+        print('0: Back')
+        answer=input('Selection [Enter: back]: ').strip()
+        if answer in ('','0'):return None
+        if answer.isdecimal() and 1<=int(answer)<=len(labels):return int(answer)-1
+        print('Invalid selection. Choose a listed number.')
+
+def browse_records(records,item_name):
+    if not records:
+        print(f'No {item_name.lower()}s found.')
+        return None
+    realms=sorted({r['realm'] for r in records},key=str.casefold)
+    while True:
+        selected=select_number('Select realm',realms)
+        if selected is None:return None
+        realm=realms[selected]
+        characters=sorted({r['character'] for r in records if r['realm']==realm},key=str.casefold)
+        while True:
+            selected=select_number('Select character – '+realm,characters)
+            if selected is None:break
+            character=characters[selected]
+            choices=[r for r in records if r['realm']==realm and r['character']==character]
+            selected=select_number(f'Select {item_name.lower()} – {realm} / {character} (newest first)',[r['label'] for r in choices])
+            if selected is not None:return choices[selected]['path']
+
+def backup_records(kind=None):
+    records=[]
+    for path in backup_entries():
+        try:
+            with zipfile.ZipFile(path) as z:manifest=json.loads(z.read('manifest.json'))
+            stored=manifest.get('kind','combined')
+            if kind and stored not in (kind,'combined'):continue
+            info=manifest['source_identity']
+            realm=info['realm'];character=info['full']
+            if not isinstance(realm,str) or not isinstance(character,str):raise ValueError('Invalid identity')
+            label=f'{path.name} [{stored}]'
+        except (OSError,ValueError,KeyError,TypeError,AttributeError,zipfile.BadZipFile):
+            if kind:continue
+            realm='Unknown Realm';character='Unreadable backups';label=path.name+' [unreadable metadata]'
+        records.append({'path':path,'realm':realm,'character':character,'label':label})
+    return records
+
+def recovery_records():
+    records=[]
+    for path in recovery_entries():
+        try:
+            log=json.loads((path/'manifest.json').read_text())
+            target=log.get('target') or recovery_context(log['client'],(e['path'] for e in log['files']))
+            realm=target['realm'];character=target['character']
+            if not isinstance(realm,str) or not isinstance(character,str):raise ValueError('Invalid identity')
+            label=f'{path.name} – {english_legacy_text(log["label"])} [{log["status"]}]'
+        except (OSError,ValueError,KeyError,TypeError,AttributeError):
+            realm='Unknown Realm';character='Unassigned'
+            label=path.name+' [unreadable metadata]'
+        records.append({'path':path,'realm':realm,'character':character,'label':label})
+    return records
 
 def choose_snapshot(kind=None):
-    current=latest_backup(kind)
-    answer=input(f'Backup [Enter: {current.name}], or enter a full path: ').strip()
-    return Path(answer.strip('"\'' )).expanduser().resolve() if answer else current
+    return browse_records(backup_records(kind),'Backup')
+
+def choose_recovery():
+    return browse_records(recovery_records(),'Recovery point')
+
 
 def menu():
     while True:
@@ -780,36 +908,40 @@ def menu_action():
     if action in ('1.1','1.2'):
         client=choose_client()
         char=choose_character(client)
-        closed_prompt()
+        wait_for_wow_closed()
         if not identity(char):
-            apply_plan(client,helper_plan(client,character=char),'Prepare character detection for backup')
+            apply_plan(client,helper_plan(client,character=char),'Prepare character detection for backup',character=char)
             print('Start WoW, log in with the template character, then quit completely. If needed, enable "WoW UI Transfer Identity" in the AddOns menu (and Load out of date AddOns).')
-            input('Press Enter when finished …');closed_prompt()
+            input('Press Enter when finished …');wait_for_wow_closed()
         create_backup(client,char,kind="addons" if action=="1.1" else "macros")
     elif action=='2.1':
-        archive=choose_snapshot('addons');print('Verifying backup …',flush=True);manifest=verify_backup(archive)
+        archive=choose_snapshot('addons')
+        if archive is None:return
+        print('Verifying backup …',flush=True);manifest=verify_backup(archive)
         require_backup_kind(manifest,'addons')
         if manifest['unsupported']:raise ValueError('Review before restoring: '+', '.join(english_legacy_text(item) for item in manifest['unsupported']))
         client=choose_client(release=True)
         print('Preparation installs missing addons from the backup and keeps existing installed versions.')
         char=choose_character(client)
-        closed_prompt()
-        apply_plan(client,install_plan(archive,manifest,client,character=char),'Prepare addon files and character detection')
+        wait_for_wow_closed()
+        apply_plan(client,install_plan(archive,manifest,client,character=char),'Prepare addon files and character detection',character=char)
         helper=char/'SavedVariables'/f'{HELPER}.lua'
         if not helper.exists():
             print('\nStart WoW, log in with '+char.name.replace('-',' ',1)+', then quit WoW completely.')
             print('Character detection records the new realm and GUID. Enable "WoW UI Transfer Identity" in the AddOns menu; enable "Load out of date AddOns" if needed.')
-            input('Press Enter when finished …');closed_prompt()
+            input('Press Enter when finished …');wait_for_wow_closed()
         if not helper.exists():raise ValueError('Character identity has not been saved yet. Enable the addon, log in, and quit WoW; then select Restore → Restore Addons again.')
         plan,notes,target=restore_plan(archive,manifest,client,char)
         print(f'\nBackup: {manifest["created"]}\nTemplate: {manifest["source_identity"]["full"]}\nTarget: {target["full"]} – {target["realm"]}\nInstallation: {client}\n{len(plan)} settings files will be changed.')
         print('Account-wide addon profiles, layouts, and key bindings also affect other characters on the destination account.')
         for note in notes:print(note)
         if input('Type RESTORE: ').strip()!='RESTORE':return
-        apply_plan(client,plan,'Restore UI backup to '+target['full']+' – '+target['realm'])
+        apply_plan(client,plan,'Restore UI backup to '+target['full']+' – '+target['realm'],character=char)
         print('Done. Start WoW and check the layout. Character detection is now disabled for this character.')
     elif action=='2.2':
-        archive=choose_snapshot('macros');print('Verifying backup …',flush=True);manifest=verify_backup(archive)
+        archive=choose_snapshot('macros')
+        if archive is None:return
+        print('Verifying backup …',flush=True);manifest=verify_backup(archive)
         require_backup_kind(manifest,'macros')
         print('Source character: '+manifest['source_identity']['full'])
         client=choose_client();char=choose_character(client)
@@ -819,27 +951,23 @@ def menu_action():
         if scope in ('account','both'):print('Account macros are shared by ALL characters on the destination account.')
         show_macro_notes(notes)
         if not plan:print('No changes required.');return
-        closed_prompt()
-        if input('Type RESTORE to replace the selected macro files: ').strip()!='RESTORE':return
-        apply_plan(client,plan,'Restore macros to '+char.name+' ('+scope+')')
+        wait_for_wow_closed()
+        if input('Are you sure you want to replace the selected macro files? [y/N]: ').strip().lower() not in ('y','yes'):
+            print('Cancelled; no macros restored.')
+            return
+        apply_plan(client,plan,'Restore macros to '+char.name+' ('+scope+')',character=char)
     elif action=='3.1':
-        choices=recovery_entries()
-        if not choices:raise ValueError('No recovery data found.')
-        for i,p in enumerate(choices,1):
-            info=json.loads((p/'manifest.json').read_text());print(f'{i}: {p.name} – {english_legacy_text(info["label"])} [{info["status"]}]')
-        print('0: Back to main menu')
-        answer=input('Number (newest operation first; Enter or 0 to go back): ').strip()
-        if answer in ('','0'):return
-        if not answer.isdecimal() or not 1<=int(answer)<=len(choices):
-            raise ValueError('Invalid recovery selection')
-        selected=choices[int(answer)-1]
-        closed_prompt();undo(selected)
+        selected=choose_recovery()
+        if selected is None:return
+        wait_for_wow_closed();undo(selected)
     elif action=='1.4':
         deletion_menu()
     elif action=='3.2':
         deletion_menu(recovery=True)
     elif action=='1.3':
-        archive=choose_snapshot();manifest=verify_backup(archive)
+        archive=choose_snapshot()
+        if archive is None:return
+        manifest=verify_backup(archive)
         print(f'Backup is valid: {len(manifest["files"])} files, {len(manifest["addons"])} addon directories, created {manifest["created"]}.')
         if manifest['unsupported']:print('Needs review: '+', '.join(english_legacy_text(item) for item in manifest['unsupported']))
     else:raise ValueError('Unknown selection')
@@ -887,7 +1015,7 @@ def main():
     print(f'Plan: {len(plan)} files. '+('Applying changes next.' if args.apply else 'Preview only; no changes.'))
     if args.apply:
         if not args.closed:raise ValueError('Quit WoW before applying changes and specify --closed.')
-        return apply_plan(client,plan,args.action)
+        return apply_plan(client,plan,args.action,character=args.character)
 
 if __name__=='__main__':
     try:main()

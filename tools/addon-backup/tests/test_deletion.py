@@ -16,20 +16,21 @@ with tempfile.TemporaryDirectory() as td:
     root=Path(td).resolve();tool=root/'tool';tool.mkdir()
     with patch.multiple(w,HERE=tool,SNAPSHOTS=tool/'Backups',RECOVERY=tool/'Recovery',LEGACY_RECOVERY=tool/'Ruecksicherungen'):
         w.SNAPSHOTS.mkdir()
-        older=w.SNAPSHOTS/'20260101_addons.zip';newer=w.SNAPSHOTS/'20260102_macros.zip'
+        older=w.SNAPSHOTS/'20260101_addons.zip';newer=w.SNAPSHOTS/'Alpha Realm'/'Character Name'/'Macros'/'20260102_macros.zip'
+        newer.parent.mkdir(parents=True)
         older.write_bytes(b'old snapshot');newer.write_bytes(b'new snapshot')
         w.json_write(tool/'latest.json',{'backup':newer.relative_to(tool).as_posix()})
         client=root/'client';client.mkdir();(client/'settings').write_bytes(b'before')
         receipt=w.apply_plan(client,{'settings':b'after'},'test restore')
         for recovery in (False,True):
-            for answers in (['0'],[''],['1',''],['1','n'],['1','invalid']):
+            for answers in (['0'],[''],['1','1','1',''],['1','1','1','n'],['1','1','1','invalid']):
                 with patch('builtins.input',side_effect=answers),redirect_stdout(io.StringIO()):
                     w.deletion_menu(recovery)
                 assert older.exists() and newer.exists() and receipt.exists()
-            with patch('builtins.input',return_value='-1'),redirect_stdout(io.StringIO()):
-                rejected(lambda:w.deletion_menu(recovery))
+            with patch('builtins.input',side_effect=['-1','0']),redirect_stdout(io.StringIO()):
+                w.deletion_menu(recovery)
         # Confirmed menu deletion removes only the chosen backup and repairs latest.json.
-        with patch('builtins.input',side_effect=['1','y']),redirect_stdout(io.StringIO()):
+        with patch('builtins.input',side_effect=['1','1','1','y']),redirect_stdout(io.StringIO()):
             w.deletion_menu()
         assert not newer.exists() and older.exists() and receipt.exists()
         assert w.latest_backup()==older
@@ -39,7 +40,7 @@ with tempfile.TemporaryDirectory() as td:
         # Undo is independent of the deleted source backups.
         undo_receipt=w.undo(receipt)
         assert (client/'settings').read_bytes()==b'before'
-        with patch('builtins.input',side_effect=['1','yes']),redirect_stdout(io.StringIO()):
+        with patch('builtins.input',side_effect=['1','1','1','yes']),redirect_stdout(io.StringIO()):
             w.deletion_menu(recovery=True)
         assert not undo_receipt.exists() and receipt.exists()
         assert (client/'settings').read_bytes()==b'before'
@@ -60,6 +61,11 @@ with tempfile.TemporaryDirectory() as td:
         linked=w.RECOVERY/'linked';linked.symlink_to(directory,target_is_directory=True)
         rejected(lambda:w.delete_recovery_point(linked))
         assert directory.exists()
+        (directory/'outside.zip').write_bytes(b'keep')
+        shortcut=w.SNAPSHOTS/'redirected-realm';shortcut.symlink_to(directory,target_is_directory=True)
+        assert not any(p.name=='outside.zip' for p in w.backup_entries())
+        rejected(lambda:w.delete_backup(shortcut/'outside.zip'))
+        assert (directory/'outside.zip').read_bytes()==b'keep'
         # Internal symlinks are removed as links, never followed.
         own=w.RECOVERY/'own';own.mkdir();(own/'manifest.json').write_text('{}')
         (own/'external').symlink_to(directory,target_is_directory=True)
