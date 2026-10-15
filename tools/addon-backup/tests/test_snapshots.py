@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory() as td:
  write(char/'macros-cache.txt',b'character macros v1')
  write(char.parent.parent/'macros-cache.txt',b'account macros')
  first=w.create_backup(client,char)
- assert first.name.endswith('_Éowyn-Surname_Beta.zip')
+ assert first.name.endswith('_Éowyn-Surname_Beta_combined.zip')
  assert w.backup_name_part('Realm / Test: PvP 2')=='Realm-Test-PvP-2'
  assert len(w.backup_name_part('界'*100).encode())<=80
  write(char/'macros-cache.txt',b'character macros v2')
@@ -52,5 +52,28 @@ with tempfile.TemporaryDirectory() as td:
  try:w.apply_plan(release,{'escape/file':b'x'},'unsafe')
  except ValueError:pass
  else:raise AssertionError('Symlink destination accepted')
+ # Separate backup types contain only their intended data.
+ addon_backup=w.create_backup(client,char,kind='addons')
+ macro_backup=w.create_backup(client,char,kind='macros')
+ am=w.verify_backup(addon_backup);mm=w.verify_backup(macro_backup)
+ assert am['kind']=='addons' and mm['kind']=='macros'
+ assert not any(Path(n).name.startswith('macros-cache.') for n in am['files'])
+ assert any(n.startswith('client/Interface/AddOns/') for n in am['files'])
+ assert set(mm['files'])=={'client/'+char.relative_to(client).as_posix()+'/macros-cache.txt','client/'+char.parent.parent.relative_to(client).as_posix()+'/macros-cache.txt'}
+ assert w.latest_backup('addons')==addon_backup and w.latest_backup('macros')==macro_backup
+ assert len(w.macro_plan(macro_backup,mm,release,dst,'both')[0])==2
+ for operation in (lambda:w.install_plan(macro_backup,mm,release,character=dst),lambda:w.restore_plan(macro_backup,mm,release,dst),lambda:w.macro_plan(addon_backup,am,release,dst)):
+  try:operation()
+  except ValueError:pass
+  else:raise AssertionError('Wrong backup type accepted')
+ # Legacy combined archives are eligible for either restore action.
+ with zipfile.ZipFile(first) as z:
+  legacy_manifest=json.loads(z.read('manifest.json'));legacy_manifest.pop('kind')
+  legacy=root/'legacy.zip'
+  with zipfile.ZipFile(legacy,'w') as out:
+   for n in z.namelist():out.writestr(n,json.dumps(legacy_manifest) if n=='manifest.json' else z.read(n))
+ lm=w.verify_backup(legacy)
+ w.require_backup_kind(lm,'addons');w.require_backup_kind(lm,'macros')
+ assert len(w.macro_plan(legacy,lm,release,dst,'both')[0])==2
  w.HERE,w.SNAPSHOTS,w.RECOVERY=original
 print('PASS backup refresh/history, archive payload install, pre-login activation, undo, corruption and symlink checks')
