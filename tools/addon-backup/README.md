@@ -24,6 +24,7 @@ python3 -B tests/test_deletion.py
 python3 -B tests/test_portability.py
 python3 -B tests/test_browsing.py
 python3 -B tests/test_process_wait.py
+python3 -B tests/test_skip_unknown.py
 ```
 
 These tests create synthetic data in temporary directories and do not modify a WoW installation. They cover character mapping, Unicode, archives, backup updates, installation, recovery, and failure handling.
@@ -38,4 +39,4 @@ Run `python3 -B wow_backup.py --help` for the CLI overview.
 
 ## Compatibility
 
-Installation and character selection have no personal defaults. A fresh clone includes no backups; create your own first. The character identity helper may require one extra login before the first backup. The launcher is for macOS; Windows startup is not provided. Addon restoration supports reviewed adapters and recognized profile formats, not every addon or WoW version. Unsupported configurations are reported and can block restoration. Live macro synchronization and future release-client compatibility still need in-game validation.
+Installation and character selection have no personal defaults. A fresh clone includes no backups; create your own first. The character identity helper may require one extra login before the first backup. The launcher is for macOS; Windows startup is not provided. Addon restoration supports reviewed adapters and recognized profile formats, not every addon or WoW version. During interactive addon restoration, unknown configurations are listed. Choose **1 – Skip listed addons and continue** to restore the supported addons, or **0 / Enter** to return. Skipped addons are not installed or restored; their existing settings and activation state are preserved. The backup remains unchanged. CLI restoration still blocks unknown configurations. Live macro synchronization and future release-client compatibility still need in-game validation.

@@ -11,6 +11,7 @@ with tempfile.TemporaryDirectory() as td:
  w.HERE=tool;w.SNAPSHOTS=tool/'Backups';w.RECOVERY=tool/'Recovery'
  source={'schema':1,'name':'Éowyn','full':'Éowyn Surname','realm':'Beta','guid':'Player-1-A','class':'DRUID'}
  write(char/'SavedVariables/WoWUITransferIdentity.lua',w.dump({'WoWUITransferIdentity':source}))
+ write(client/('Interface/AddOns/'+w.HELPER+'/'+w.HELPER+'.toc'),b'## Interface: 16001\n## Version: 1\n')
  write(char/'AddOns.txt',b'TestAce: disabled\n')
  write(client/'Interface/AddOns/TestAce/TestAce.toc',b'## Interface: 16001\n## Version: 1\n## SavedVariables: TestDB\nmain.lua\n')
  write(client/'Interface/AddOns/TestAce/main.lua',b'-- addon payload version 1\n')
@@ -81,6 +82,17 @@ with tempfile.TemporaryDirectory() as td:
   try:operation()
   except ValueError:pass
   else:raise AssertionError('Wrong backup type accepted')
+ # Full restore with the identity addon installed must preserve target identity.
+ w.apply_plan(release,w.install_plan(addon_backup,am,release,character=dst),'prepare restore')
+ target=dict(source,name='New',full='New Surname',realm='Release',guid='Player-2-B')
+ identity_file=dst/'SavedVariables'/f'{w.HELPER}.lua'
+ identity_bytes=w.dump({w.HELPER:target});write(identity_file,identity_bytes)
+ plan,notes,detected=w.restore_plan(addon_backup,am,release,dst)
+ assert identity_file.relative_to(release).as_posix() not in plan
+ w.apply_plan(release,plan,'restore addon settings')
+ assert identity_file.read_bytes()==identity_bytes and detected==target
+ restored=w.plain(w.parse((dst.parent.parent/'SavedVariables/TestAce.lua').read_bytes()))
+ assert restored['TestDB']['profiles'][restored['TestDB']['profileKeys']['New Surname']]['width']==100
  # Legacy combined archives are eligible for either restore action.
  with zipfile.ZipFile(first) as z:
   legacy_manifest=json.loads(z.read('manifest.json'));legacy_manifest.pop('kind')

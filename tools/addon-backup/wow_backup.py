@@ -54,7 +54,14 @@ def dump(roots):
         if isinstance(v,Atom):
             if v.raw is not None:return v.raw
             v=v.value
-        if isinstance(v,dict): return '{\n'+''.join('['+value(k)+'] = '+value(x)+',\n' for k,x in v.items())+'}'
+        if isinstance(v,dict):
+            # Preserve sequence constructors, including explicit nil slots.
+            # RestedXP calls unpack on {point, nil, relativePoint, x, y}.
+            # Rewriting this as hash fields can change Lua's length boundary
+            # and truncate unpack at the nil slot even though x/y are present.
+            if v and all(type(k) is int for k in v) and set(v)==set(range(1,len(v)+1)):
+                return '{\n'+''.join(value(v[k])+',\n' for k in range(1,len(v)+1))+'}'
+            return '{\n'+''.join('['+value(k)+'] = '+value(x)+',\n' for k,x in v.items())+'}'
         if isinstance(v,str):return quote(v)
         if v is None:return 'nil'
         if isinstance(v,bool):return 'true' if v else 'false'
@@ -175,7 +182,7 @@ def inventory(addons):
     return result
 
 # Account files with reviewed storage conventions. AceDB databases are also supported generically.
-REVIEWED={'AtlasBIStooltips','AtlasLootClassic','Auctionator','DandersFrames','DandersMover','Decursive','MoveAny','Pawn','Prat-3.0','Questie','RXPGuides','RareScanner','TipTac','Details','Details_Streamer','Bartender4','Grid2','Atlas','AtlasLootContinued','ShadowedUnitFrames','Chatify','Bagnon','MinimapButtonButton'}
+REVIEWED={'ForeverDualGathering','AtlasBIStooltips','AtlasLootClassic','Auctionator','DandersFrames','DandersMover','Decursive','MoveAny','Pawn','Prat-3.0','Questie','RXPGuides','RareScanner','TipTac','Details','Details_Streamer','Bartender4','Grid2','Atlas','AtlasLootContinued','ShadowedUnitFrames','Chatify','Bagnon','MinimapButtonButton'}
 CHAR_CONFIG={'DBM-Core','MoveAny','Blizzard_DamageMeter','Blizzard_RaidUI','Blizzard_TimeManager','Auctionator'}
 CHAR_SPECIAL={'Questie','DandersFrames','Details','Pawn','RXPGuides','Prat-3.0','EllesmereUIChat','Details_EncounterDetails','Details_Vanguard'}
 CHAR_BLIZZARD_RUNTIME={'Blizzard_AuctionHouseUI','Blizzard_ClientSavedVariables','Blizzard_Communities','Blizzard_LegacyChallengeTracker','Blizzard_Professions'}
@@ -196,6 +203,45 @@ def audit_support(client,char):
         if p.stem not in CHAR_CONFIG|CHAR_SPECIAL|CHAR_BLIZZARD_RUNTIME and p.stem!=HELPER:
             unsupported.append('Character file: '+p.name)
     return unsupported
+
+def pending_reviews(manifest):
+    # A snapshot records support at creation time. Newly reviewed account
+    # adapters also apply to existing archives without rewriting the backup.
+    pending=[]
+    for item in manifest.get('unsupported',[]):
+        normalized=english_legacy_text(item)
+        prefix='Account file: '
+        if normalized.startswith(prefix):
+            filename=normalized[len(prefix):]
+            if filename.endswith('.lua') and filename[:-4] in REVIEWED:
+                continue
+        pending.append(normalized)
+    return pending
+
+def select_supported_addons(manifest):
+    reviews=pending_reviews(manifest)
+    if not reviews:return manifest
+    skipped=set()
+    print('Unknown addon configurations:')
+    for item in reviews:
+        print('  - '+item)
+        match=re.fullmatch(r'(?:Account|Character) file: ([^/\\]+)\.lua',item)
+        if not match:raise ValueError('Cannot safely skip this review item: '+item)
+        skipped.add(match.group(1))
+    print('Skipped addons will not be installed or restored. Their existing settings and enabled state are kept.')
+    print('1  Skip listed addons and continue\n0  Back')
+    while True:
+        answer=input('Selection [Enter: back]: ').strip()
+        if answer in ('','0'):return None
+        if answer=='1':break
+        print('Choose 1 or 0.')
+    result=copy.deepcopy(manifest)
+    result['skipped_addons']=sorted(skipped)
+    result['unsupported']=[]
+    result['addons']={k:v for k,v in result['addons'].items() if k not in skipped}
+    result['files']={k:v for k,v in result['files'].items()
+                     if not (PurePosixPath(k).parent.name=='SavedVariables' and PurePosixPath(k).stem in skipped)}
+    return result
 
 def create_backup(client,char,kind="combined"):
     if kind not in ("addons","macros","combined"):raise ValueError("Unknown backup type")
@@ -481,20 +527,31 @@ def sanitize_account(name,roots,existing,source,target):
 def account_config(name,data,target_data,source,target):
     roots=parse(data);existing=parse(target_data) if target_data else {}
     clean=sanitize_account(name,roots,existing,source,target)
-    mapping=identity_map(source,target);out=remap(clean,mapping)
+    mapping=identity_map(source,target)
+    # RestedXP's bundled AceDB uses ruleset names (PvP/PvE/RP/Hardcore)
+    # on Forever instead of the displayed realm name. Older saves may still
+    # use the full character name, so retain those as fallback candidates.
+    rxp_source=source['name']+' - '+(source.get('realmKey') or source['realm'])
+    rxp_target=target['name']+' - '+(target.get('realmKey') or target['realm'])
+    if name=='RXPGuides':mapping[rxp_source]=rxp_target
+    out=remap(clean,mapping)
     for rootkey,root in out.items():
         original=roots[rootkey]
         if not isinstance(root,dict) or not isinstance(original,dict) or 'profileKeys' not in original:continue
         keys=original['profileKeys']
         candidates=[source['full'],source['name']+' - '+source['realm']]
+        if name=='RXPGuides':candidates.insert(0,rxp_source)
         chosen=next((scalar(keys[k]) for k in candidates if k in keys),None)
         if chosen is None:continue
         chosen=mapping.get(chosen,chosen)
         root.setdefault('profileKeys',{})[target['full']]=Atom(chosen)
         root['profileKeys'][target['name']+' - '+target['realm']]=Atom(chosen)
+        if name=='RXPGuides':root['profileKeys'][rxp_target]=Atom(chosen)
     return dump(out)
 
 def character_config(name,data,target_data,source,target):
+    # Identity belongs to the destination and must never be restored from a template.
+    if name==HELPER:return target_data
     src=parse(data);dst=parse(target_data) if target_data else {}
     out=copy.deepcopy(dst);mapping=identity_map(source,target)
     if name in CHAR_CONFIG:return dump(remap(src,mapping))
@@ -594,16 +651,20 @@ def install_plan(archive,manifest,client,replace=False,character=None):
     plan.update(helper_plan(client,manifest,character))
     if character is not None:
         with zipfile.ZipFile(archive) as z:
-            plan[(character/'AddOns.txt').relative_to(client).as_posix()]=activation_data(z,manifest,set(existing)|set(manifest['addons']),helper_enabled=True)
+            plan[(character/'AddOns.txt').relative_to(client).as_posix()]=activation_data(z,manifest,set(existing)|set(manifest['addons']),helper_enabled=True,target_data=(character/'AddOns.txt').read_bytes() if (character/'AddOns.txt').exists() else None)
     return plan
 
-def activation_data(z,manifest,installed,helper_enabled=False):
+def activation_data(z,manifest,installed,helper_enabled=False,target_data=None):
     states={}
     member='client/'+manifest['source_character']+'/AddOns.txt'
     if member in manifest['files']:
         for name,state in re.findall(r'^([^:\r\n]+):\s*(enabled|disabled)',decode(z.read(member)),re.M):states[name]=state
     expected=set(manifest['addons'])
     for addon in installed:states[addon]=states.get(addon,'enabled') if addon in expected else 'disabled'
+    target_states=dict(re.findall(r'^([^:\r\n]+):\s*(enabled|disabled)',decode(target_data or b''),re.M))
+    for addon in manifest.get('skipped_addons',[]):
+        states.pop(addon,None)
+        if addon in target_states:states[addon]=target_states[addon]
     states[HELPER]='enabled' if helper_enabled else 'disabled'
     return encode(''.join(name+': '+state+'\n' for name,state in sorted(states.items())))
 
@@ -613,11 +674,11 @@ def restore_plan(archive,manifest,client,char):
     target=identity(char)
     if not target:raise ValueError('Target identity is unknown. Complete preparation and log in for character detection first.')
     source=manifest['source_identity'];account=char.parent.parent
-    if manifest['unsupported']:raise ValueError('Backup contains configurations that still need review: '+', '.join(english_legacy_text(item) for item in manifest['unsupported']))
+    if pending_reviews(manifest):raise ValueError('Backup contains configurations that still need review: '+', '.join(pending_reviews(manifest)))
     expected=set(manifest['addons']);actual=inventory(client/'Interface/AddOns')
     missing=expected-set(actual)
     if missing:raise ValueError('Addon files are missing; run preparation first: '+', '.join(sorted(missing)))
-    plan={};notes=[]
+    plan={};notes=['Skipped addon: '+addon for addon in manifest.get('skipped_addons',[])]
     for addon in expected & set(actual):
         if manifest['addons'][addon].get('Version')!=actual[addon].get('Version'):notes.append('Keeping a different installed addon version: '+addon)
     if source['class']!=target['class']:notes.append('Different class: '+source['class']+' → '+target['class']+'. Spells and click-casting may need adjustment in the game.')
@@ -645,7 +706,7 @@ def restore_plan(archive,manifest,client,char):
             if member in manifest['files']:put(dest_dir/name,merge_cvars(z.read(member),existing(dest_dir/name)))
         member=srcchar+'/chat-cache.txt'
         if member in manifest['files']:put(char/'chat-cache.txt',merge_chat(z.read(member),existing(char/'chat-cache.txt')))
-        put(char/'AddOns.txt',activation_data(z,manifest,set(actual),helper_enabled=False))
+        put(char/'AddOns.txt',activation_data(z,manifest,set(actual),helper_enabled=False,target_data=existing(char/'AddOns.txt')))
     return plan,notes,target
 
 def macro_plan(archive, manifest, client, char, scope='character'):
@@ -919,7 +980,8 @@ def menu_action():
         if archive is None:return
         print('Verifying backup …',flush=True);manifest=verify_backup(archive)
         require_backup_kind(manifest,'addons')
-        if manifest['unsupported']:raise ValueError('Review before restoring: '+', '.join(english_legacy_text(item) for item in manifest['unsupported']))
+        manifest=select_supported_addons(manifest)
+        if manifest is None:return
         client=choose_client(release=True)
         print('Preparation installs missing addons from the backup and keeps existing installed versions.')
         char=choose_character(client)
@@ -935,7 +997,7 @@ def menu_action():
         print(f'\nBackup: {manifest["created"]}\nTemplate: {manifest["source_identity"]["full"]}\nTarget: {target["full"]} – {target["realm"]}\nInstallation: {client}\n{len(plan)} settings files will be changed.')
         print('Account-wide addon profiles, layouts, and key bindings also affect other characters on the destination account.')
         for note in notes:print(note)
-        if input('Type RESTORE: ').strip()!='RESTORE':return
+        if input('Are you sure you want to restore the selected addon settings? [y/N]: ').strip().lower() not in ('y','yes'):return
         apply_plan(client,plan,'Restore UI backup to '+target['full']+' – '+target['realm'],character=char)
         print('Done. Start WoW and check the layout. Character detection is now disabled for this character.')
     elif action=='2.2':
@@ -969,7 +1031,7 @@ def menu_action():
         if archive is None:return
         manifest=verify_backup(archive)
         print(f'Backup is valid: {len(manifest["files"])} files, {len(manifest["addons"])} addon directories, created {manifest["created"]}.')
-        if manifest['unsupported']:print('Needs review: '+', '.join(english_legacy_text(item) for item in manifest['unsupported']))
+        if pending_reviews(manifest):print('Needs review: '+', '.join(pending_reviews(manifest)))
     else:raise ValueError('Unknown selection')
 
 def main():
