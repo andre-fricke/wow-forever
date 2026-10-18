@@ -15,7 +15,7 @@ A fresh clone contains no personal backups or recovery points. Choose your own W
 5. Select the beta installation and template character. Select the installation by number or enter its full path, then choose your character by name or number.
 6. The tool checks automatically whether WoW is running. If needed, quit WoW during the 30-second wait; the countdown is displayed every five seconds. If WoW remains open, the action is cancelled. Wait for **Verification successful: all archived files passed their checksum checks.**
 
-Every run creates a new ZIP snapshot of the selected backup type in `Backups/<Realm>/<Character>/Addons/` or `Backups/<Realm>/<Character>/Macros/`. Realm and character folder names use underscores instead of spaces or other separators and preserve Unicode letters, for example `Backups/Classic_Beta_PvP_2/Cannot_Hotalot/Addons/`. Filenames include the timestamp, full character name, and realm, for example `20261014-161319-002099_Cannot-Hotalot_Classic-Beta-PvP-2_addons.zip`. Spaces and filename-unsafe characters are replaced with hyphens; Unicode letters are preserved. Existing backups keep their original names and remain supported. `latest.json` points to the newest successful backup. Earlier snapshots are not overwritten. Settings changes and newly installed addon files are read again during each backup. If a new configuration has no reviewed import adapter, the tool reports it during backup; have that message reviewed before release.
+Every run creates a new ZIP snapshot of the selected backup type in `Backups/<Realm>/<Character>/Addons/` or `Backups/<Realm>/<Character>/Macros/`. Realm and character folder names use underscores instead of spaces or other separators and preserve Unicode letters, for example `Backups/Classic_Beta_PvP_2/Cannot_Hotalot/Addons/`. Filenames include the timestamp, full character name, and realm, for example `20261014-161319-002099_Cannot-Hotalot_Classic-Beta-PvP-2_addons.zip`. Spaces and filename-unsafe characters are replaced with hyphens; Unicode letters are preserved. Existing backups keep their original names and remain supported. `latest.json` points to the newest successful backup. Earlier snapshots are not overwritten. Settings changes and newly installed addon files are read again during each backup. If a new configuration has no reviewed import adapter, the tool reports it during backup; review the message; during restoration you can skip the listed addons and continue with supported settings.
 
 You can then copy the entire tool directory to another drive. Restoration no longer requires the original beta installation.
 
@@ -27,9 +27,9 @@ You can then copy the entire tool directory to another drive. Restoration no lon
 4. Select the source realm, then the source character, then an addon backup. Matching backups are listed newest first; older combined backups are also available.
 5. Choose the **release installation directory**. You can enter its full path; it must contain `WTF` and the client.
 6. Select the new character by name or number. The tool checks whether WoW has closed and waits up to 30 seconds if necessary.
-7. The tool installs missing addon files, applies addon activation for this character, and installs the small local **WoW UI Transfer Identity** helper.
-8. On the first run, it requests **one additional login with this character**. Quit WoW completely afterward and press Enter in the tool. The helper records the actual name, realm, GUID, and class locally. If needed, enable **WoW UI Transfer Identity** in the **AddOns** menu and enable **Load out of date AddOns**.
-9. Review the destination and planned changes, then type `RESTORE`.
+7. If the character identity is unknown, confirm preparation of the small local **WoW UI Transfer Identity** helper. This only installs/enables character detection; it does not install addons from the backup.
+8. If detection was needed, it requests **one additional login with this character**. Quit WoW completely afterward and press Enter in the tool. The helper records the actual name, realm, GUID, and class locally. If needed, enable **WoW UI Transfer Identity** in the **AddOns** menu and enable **Load out of date AddOns**.
+9. Review the destination and complete plan, then answer `y` to confirm (`Enter` or `n` cancels). Missing addon packages and settings are written together, with one recovery point. For an already recognized character, no files are changed before this confirmation.
 10. After the files have been written and verified, start WoW and check the layout. Character detection is now disabled for this character.
 
 The extra login provides reliable identity detection. A numeric realm directory such as `70` is not enough to infer the release realm or new GUID. You do not need to find or enter these values yourself.
@@ -44,7 +44,7 @@ The extra login provides reliable identity detection. A numeric realm directory 
 - Key bindings and selected UI/display variables, including UI scale, brightness, contrast, nameplate settings, and damage display settings.
 - Known character name formats, realm references, and exact references to your character's GUID, mapped to the identity detected by the release client.
 
-**Account-wide settings also affect other characters on the destination account.** The tool backs up affected destination files first. Full migration is intended for a fresh release account; consider this shared scope when using an established account.
+**Account-wide settings also affect other characters on the destination account.** The tool backs up affected destination files first. AceDB-style profiles are copied into a private destination profile, preserving other character profiles and progress. Genuinely account-wide settings still have a shared scope on an established account.
 
 ## Character data and classes
 
@@ -70,7 +70,7 @@ Select **1 → 1.3 – Verify Backup**, then choose a realm, character, and back
 
 ## Command-line usage
 
-`wow_backup.py` also provides `backup`, `verify`, `prepare`, `restore`, and `undo` commands. Without `--apply`, `prepare` and `restore` only show a preview. CLI operations that write files require `--closed`, confirming that WoW has been fully closed. For `prepare`, the explicit `--replace-addons` option replaces existing addon versions with the archived files. The normal menu keeps existing versions.
+`wow_backup.py` also provides `backup`, `verify`, `prepare`, `restore`, and `undo` commands. Without `--apply`, `prepare` and `restore` only show a preview. CLI operations that write files require `--closed` and also check the WoW process automatically; the flag does not bypass that check. Use `--skip-unknown` with `restore` to leave unsupported addons unchanged. For `prepare`, the explicit `--replace-addons` option replaces existing addon versions with the archived files. The normal menu keeps existing versions.
 
 ## Transferring macros between characters
 
@@ -123,4 +123,4 @@ New recovery points store the destination identity alongside their rollback file
 
 ## Automatic WoW process check
 
-Interactive backup creation, addon/macro restoration, and recovery-point restoration check the WoW process automatically. If WoW is already closed, the action continues immediately. Otherwise, quit the game while the tool waits up to 30 seconds. It checks every second and prints `30`, `25`, `20`, `15`, `10`, `5`, and `0` seconds remaining as needed. It continues as soon as WoW closes; a timeout or unavailable process check cancels the current action and returns to the main menu. The tool never force-quits WoW. The same check runs after a character-detection login. CLI write operations still require the explicit `--closed` flag.
+Interactive backup creation, addon/macro restoration, and recovery-point restoration check the WoW process automatically. If WoW is already closed, the action continues immediately. Otherwise, quit the game while the tool waits up to 30 seconds. It checks every second and prints `30`, `25`, `20`, `15`, `10`, `5`, and `0` seconds remaining as needed. It continues as soon as WoW closes; a timeout or unavailable process check cancels the current action and returns to the main menu. The tool never force-quits WoW. The same check runs after a character-detection login. CLI write operations use the same process checks and retain the explicit `--closed` flag for compatibility.

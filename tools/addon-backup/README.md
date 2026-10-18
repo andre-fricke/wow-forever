@@ -16,16 +16,16 @@ A Git clone does not include personal backups. These are created in `Backups/<Re
 Run from this directory:
 
 ```sh
-python3 -B tests/test_core.py
-python3 -B tests/test_snapshots.py
-python3 -B tests/test_macros.py
-python3 -B tests/test_menu.py
-python3 -B tests/test_deletion.py
-python3 -B tests/test_portability.py
-python3 -B tests/test_browsing.py
-python3 -B tests/test_process_wait.py
-python3 -B tests/test_skip_unknown.py
+python3 -B run_tests.py
 ```
+
+For the full release check, install Lua 5.1 (or set `LUA_RUNTIME` to its executable) and run:
+
+```sh
+python3 -B run_tests.py --require-lua
+```
+
+The tool itself still needs only Python. Lua is a development test dependency: only synthetic fixtures are executed. GitHub Actions runs the full check on macOS with Python 3.9 and 3.13.
 
 These tests create synthetic data in temporary directories and do not modify a WoW installation. They cover character mapping, Unicode, archives, backup updates, installation, recovery, and failure handling.
 
@@ -39,4 +39,15 @@ Run `python3 -B wow_backup.py --help` for the CLI overview.
 
 ## Compatibility
 
-Installation and character selection have no personal defaults. A fresh clone includes no backups; create your own first. The character identity helper may require one extra login before the first backup. The launcher is for macOS; Windows startup is not provided. Addon restoration supports reviewed adapters and recognized profile formats, not every addon or WoW version. During interactive addon restoration, unknown configurations are listed. Choose **1 – Skip listed addons and continue** to restore the supported addons, or **0 / Enter** to return. Skipped addons are not installed or restored; their existing settings and activation state are preserved. The backup remains unchanged. CLI restoration still blocks unknown configurations. Live macro synchronization and future release-client compatibility still need in-game validation.
+Installation and character selection have no personal defaults. A fresh clone includes no backups; create your own first. The character identity helper may require one extra login before the first backup. The launcher is for macOS; Windows startup is not provided. Addon restoration supports reviewed adapters and recognized profile formats, not every addon or WoW version. During interactive addon restoration, unknown configurations are listed. Choose **1 – Skip listed addons and continue** to restore the supported addons, or **0 / Enter** to return. Skipped addons are not installed or restored; their existing settings and activation state are preserved. The backup remains unchanged. CLI restoration also supports skipping these configurations with `--skip-unknown`. Without that option it stops for review. Live macro synchronization and future release-client compatibility still need in-game validation.
+
+
+## Restore behavior
+
+For a recognized character, installation and settings are planned together and written only after the final y/N confirmation. One recovery point covers that complete operation. If identity detection is needed, a separate confirmed preparation installs/enables only the identity helper; it does not install the backed-up addons. Cancelling the later restore leaves that explicitly accepted preparation in place.
+
+AceDB-style imports create or update a private profile for the destination character. Existing source/other-character profiles and destination progress are retained. If the normal profile name is shared or occupied, a deterministic ` [UI Backup]` suffix avoids overwriting it. Addons with genuinely account-wide settings still affect the entire destination account.
+
+Both the menu and CLI check the WoW process. CLI write commands retain `--closed` for compatibility, but it never bypasses the process check. Restore plans are checked for destination changes after preview before writing.
+
+See [architecture and maintenance](ARCHITECTURE.md) for module boundaries, adapter policies and development checks.

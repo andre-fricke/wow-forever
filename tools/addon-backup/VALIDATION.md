@@ -1,4 +1,25 @@
-# Validation on October 14, 2026
+# Validation on October 18, 2026
+
+The first-version refactor was checked with `python3 -B run_tests.py --require-lua` using Python 3.9 and a temporary Lua 5.1.5 build. All 12 self-contained test scripts passed. No live WoW files were modified.
+
+Additional coverage now includes:
+
+- Same-account migration with source, destination and third-character data; unchanged progression and unrelated profiles.
+- Shared profile/name collisions and stable private destination profiles on repeated restores.
+- Actual Lua `unpack` behavior for RestedXP position lists containing a nil slot.
+- Cancelled addon restore with no installation or settings writes.
+- Missing addon installation and settings applied in one recoverable transaction.
+- CLI preview/apply and automatic process checks, including refusal when the process check fails.
+- Changed destination files after preview, rejected before writing.
+- Invalid manifest metadata and legacy schema-1 archive compatibility.
+
+The existing local addon snapshot from October 18 was also restored into an isolated temporary client with a different account, realm, GUID and class. The integration test passed, including preserved target progress, visual profiles and an unchanged second restore.
+
+GitHub Actions is configured for macOS with Python 3.9 and 3.13 and Lua 5.1.5. The hosted workflow has not run yet. Tests do not establish future release-client API compatibility or replace an in-game layout check.
+
+---
+
+# Historical validation on October 14, 2026
 
 ## Source data
 
