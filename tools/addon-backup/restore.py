@@ -4,7 +4,8 @@ from pathlib import Path, PurePosixPath
 import re
 import zipfile
 from characters import HELPER, identity, inventory, characters
-from saved_variables import encode, decode
+from saved_variables import encode, decode, parse, dump
+from macro_placement import placement_member, placement_snapshot
 from models import CharacterIdentity
 from file_ops import Archived, rooted, sha
 from addon_support import pending_reviews
@@ -37,10 +38,13 @@ def helper_plan(client, manifest=None, character=None):
     toc = (
         "## Interface: "
         + ", ".join(sorted(interfaces, key=int))
-        + "\n## Title: WoW UI Transfer Identity\n## Notes: Records this character identity locally for UI backup restoration.\n## Version: 1.0\n## SavedVariablesPerCharacter: WoWUITransferIdentity\nidentity.lua\n"
+        + "\n## Title: WoW UI Transfer Identity\n## Notes: Records character identity and macro slots for backup restoration.\n## Version: 1.2\n## SavedVariablesPerCharacter: WoWUITransferIdentity, WoWUITransferBars, WoWUITransferBarsPending\nidentity.lua\nactionbars.lua\n"
     )
     prefix = "Interface/AddOns/" + HELPER + "/"
     plan = {
+        prefix + "actionbars.lua": (
+            Path(__file__).resolve().parent / "actionbars.lua"
+        ).read_bytes(),
         prefix + HELPER + ".toc": encode(toc),
         prefix
         + "identity.lua": (
@@ -253,7 +257,31 @@ def restore_plan(archive, manifest, client, char, allow_missing=False):
     return plan, notes, target
 
 
-def macro_plan(archive, manifest, client, char, scope="character"):
+def click_casting_plan(archive, manifest, client, char):
+    """Restore only the selected character's native Click Casting cache."""
+    require_backup_kind(manifest, "click-casting")
+    client, char = client.resolve(), char.resolve()
+    if char not in [p.resolve() for p in characters(client)]:
+        raise ValueError("Target character does not belong to the destination client")
+    member = str(PurePosixPath("client") / manifest["source_character"] / "click-bindings-cache.txt")
+    if member not in manifest["files"]:
+        raise ValueError("This backup contains no built-in WoW Click Casting settings.")
+    with zipfile.ZipFile(archive) as z:
+        data = z.read(member)
+    if sha(data) != manifest["files"][member]["sha256"]:
+        raise ValueError("Corrupted backup file: " + member)
+    rel = (char / "click-bindings-cache.txt").relative_to(client).as_posix()
+    destination = rooted(client, rel)
+    plan = {} if destination.exists() and destination.read_bytes() == data else {rel: data}
+    notes = [
+        "Replaces the selected character's complete built-in WoW Click Casting settings.",
+        "Spell and macro references are copied unchanged. Restore matching macros first; macro references must resolve to the same macro entries on the target character.",
+        "Addon Click Casting, macros, action bar slots and keyboard bindings are not changed. Check the bindings in WoW after login.",
+    ]
+    return plan, notes
+
+
+def macro_plan(archive, manifest, client, char, scope="character", restore_slots=False):
     """Restore complete macro files without changing macro bodies or identifiers."""
     require_backup_kind(manifest, "macros")
     client = client.resolve()
@@ -291,6 +319,45 @@ def macro_plan(archive, manifest, client, char, scope="character"):
             )
             if not target.exists() or target.read_bytes() != data:
                 plan[rel] = data
+        if restore_slots:
+            member = placement_member(manifest)
+            if member not in manifest["files"]:
+                raise ValueError("This backup has no macro slot snapshot. Create a new macro backup.")
+            data = z.read(member)
+            if sha(data) != manifest["files"][member]["sha256"]:
+                raise ValueError("Corrupted backup file: " + member)
+            snapshot = placement_snapshot(data)
+            account_slots = sum(entry["scope"] == "account" for entry in snapshot["slots"].values())
+            character_slots = len(snapshot["slots"]) - account_slots
+            notes.append(f"Captured macro slots: {character_slots} character, {account_slots} account. Selected scope: {scope}.")
+            slots = {
+                slot: entry for slot, entry in snapshot["slots"].items()
+                if scope == "both" or entry["scope"] == scope
+            }
+            for entry in slots.values():
+                src, _ = locations[entry["scope"]]
+                if str(src / "macros-cache.txt") not in manifest["files"]:
+                    raise ValueError("Macro slot snapshot references a missing macro file.")
+            if slots:
+                plan.update(helper_plan(client, character=char))
+                rel = (char / "SavedVariables" / (HELPER + ".lua")).relative_to(client).as_posix()
+                target_file = rooted(client, rel)
+                saved = parse(target_file.read_bytes()) if target_file.exists() else {}
+                saved["WoWUITransferBarsPending"] = {"schema": 1, "slots": slots}
+                plan[rel] = dump(saved)
+                notes.append(f"{len(slots)} macro slots will be restored on next login, replacing actions in those slots. Other slots stay unchanged.")
+                notes.append("Recovery restores local files; it cannot undo action slots already applied in the game.")
+            else:
+                notes.append("No macro slots in the selected scope.")
+        if not restore_slots or not slots:
+            # A previously queued placement must not run after a macros-only restore.
+            rel = (char / "SavedVariables" / (HELPER + ".lua")).relative_to(client).as_posix()
+            target_file = rooted(client, rel)
+            if target_file.exists():
+                saved = parse(target_file.read_bytes())
+                if "WoWUITransferBarsPending" in saved:
+                    saved.pop("WoWUITransferBarsPending")
+                    plan[rel] = dump(saved)
     return plan, notes
 
 
@@ -301,5 +368,5 @@ def show_macro_notes(notes):
         "Macro bodies are copied unchanged. Check class-specific spells and explicit character names in the game."
     )
     print(
-        "Action bar placement is not restored. Check the macros after login; live client/server synchronization has not been validated."
+        "Only explicitly selected macro slots are queued for placement. Check the result after login; client/server synchronization requires in-game validation."
     )

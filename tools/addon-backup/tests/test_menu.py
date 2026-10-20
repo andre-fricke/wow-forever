@@ -10,7 +10,7 @@ import wow_backup as w
 
 # A backup can be followed immediately by another action in the same session.
 with (
-    patch("builtins.input", side_effect=["1", "1", "1", "3", "0"]),
+    patch("builtins.input", side_effect=["1", "1", "1", "4", "0"]),
     patch.object(w, "choose_client", return_value=Path("/test/client")),
     patch.object(w, "choose_character", return_value=Path("/test/character")),
     patch.object(w, "wait_for_wow_closed"),
@@ -83,14 +83,46 @@ with (
     patch.object(w, "choose_character", return_value=Path("/test/character")),
     patch.object(w, "wait_for_wow_closed"),
     patch.object(w, "identity", return_value={"name": "Test"}),
+    patch.object(w, "helper_plan", return_value={}),
+    patch.object(w, "apply_plan") as prepare,
+    patch.object(Path, "read_bytes", return_value=b'WoWUITransferBars = {schema=2, slots={}, macroActions=0, savedAt=1}'),
     patch.object(w, "create_backup") as backup,
-    redirect_stdout(io.StringIO()),
+    redirect_stdout(io.StringIO()) as output,
 ):
     w.menu()
     backup.assert_called_once_with(
         Path("/test/client"), Path("/test/character"), kind="macros"
     )
+    prepare.assert_not_called()
+    assert "Start WoW" not in output.getvalue()
+    assert "last logout" in output.getvalue()
 print("PASS backup submenus, macro dispatch and back navigation")
+
+# Repair a missing/disabled helper without forcing a login for a valid snapshot.
+# Only an absent/incompatible snapshot requires the capture login.
+for missing in (False, True):
+    responses = ["1", "2"] + ([""] if missing else []) + ["0"]
+    snapshots = [ValueError("Missing snapshot"), {"slots": {}}] if missing else [{"slots": {}}]
+    with (
+        patch("builtins.input", side_effect=responses),
+        patch.object(w, "choose_client", return_value=Path("/test/client")),
+        patch.object(w, "choose_character", return_value=Path("/test/character")),
+        patch.object(w, "wait_for_wow_closed") as wait,
+        patch.object(w, "identity", return_value={"name": "Test"}),
+        patch.object(w, "helper_plan", return_value={"helper.lua": b"updated"}),
+        patch.object(w, "apply_plan") as prepare,
+        patch.object(Path, "exists", return_value=False),
+        patch.object(Path, "read_bytes", return_value=b"snapshot"),
+        patch("macro_placement.placement_snapshot", side_effect=snapshots),
+        patch.object(w, "create_backup") as backup,
+        redirect_stdout(io.StringIO()) as output,
+    ):
+        w.menu()
+        prepare.assert_called_once()
+        backup.assert_called_once()
+        assert ("Start WoW" in output.getvalue()) == missing
+        assert wait.call_count == (2 if missing else 1)
+print("PASS saved macro slots avoid relogin, helper repair, first-capture login")
 
 # Legacy tool labels are translated, but embedded character names are left intact.
 assert (

@@ -113,7 +113,7 @@ for answer in ("", "n", "N", "invalid", "y", "Y", "yes", "YES"):
         patch("builtins.input", side_effect=["2", "2", "character", answer, "0"]),
         patch.object(w, "choose_snapshot", return_value=Path("/test/backup.zip")),
         patch.object(
-            w, "verify_backup", return_value={"source_identity": {"full": "Source"}}
+            w, "verify_backup", return_value={"source_identity": {"full": "Source"}, "source_character": "WTF/Account/A/R/C", "files": {}}
         ),
         patch.object(w, "choose_client", return_value=Path("/test/client")),
         patch.object(w, "choose_character", return_value=Path("/test/character")),

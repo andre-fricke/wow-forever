@@ -49,6 +49,7 @@ POLICIES = {
     "Questie": AddonPolicy(True, "custom"),
     "RXPGuides": AddonPolicy(True, "custom"),
     "RareScanner": AddonPolicy(True, None),
+    "RestedXPTextOnly": AddonPolicy(False, "replace"),
     "ShadowedUnitFrames": AddonPolicy(True, None),
     "TipTac": AddonPolicy(True, None),
 }
@@ -277,6 +278,36 @@ def destination_profile(profiles, keys, aliases, full_name):
         number += 1
 
 
+def namespace_profiles(source, existing, chosen, selected, mapping):
+    """AceDB namespaces inherit the parent profile name, not profileKeys."""
+    out = copy.deepcopy(existing)
+    for key in source.keys() | existing.keys():
+        src = source.get(key, {})
+        dst = out.setdefault(key, {})
+        # Preserve destination globals, character data and unrelated profiles.
+        # Missing source entries mean addon defaults, not old target values.
+        dst.setdefault("profiles", {})[selected] = remap(
+            src.get("profiles", {}).get(chosen, {}), mapping
+        )
+        if "namespaces" in src or "namespaces" in dst:
+            dst["namespaces"] = namespace_profiles(
+                src.get("namespaces", {}),
+                dst.get("namespaces", {}),
+                chosen,
+                selected,
+                mapping,
+            )
+    return out
+
+
+def namespace_profile_names(namespaces):
+    names = set()
+    for namespace in namespaces.values():
+        names.update(namespace.get("profiles", {}))
+        names.update(namespace_profile_names(namespace.get("namespaces", {})))
+    return names
+
+
 def account_config(name, data, target_data, source, target):
     roots = parse(data)
     existing = parse(target_data) if target_data else {}
@@ -310,9 +341,20 @@ def account_config(name, data, target_data, source, target):
             raise ValueError(
                 "Selected addon profile is missing: " + name + " / " + str(chosen)
             )
-        selected = destination_profile(
-            root["profiles"], root["profileKeys"], target_aliases, target["full"]
+        occupied = set(root["profiles"]) | namespace_profile_names(
+            old.get("namespaces", {})
         )
+        selected = destination_profile(
+            occupied, root["profileKeys"], target_aliases, target["full"]
+        )
+        if "namespaces" in original or "namespaces" in old:
+            root["namespaces"] = namespace_profiles(
+                original.get("namespaces", {}),
+                old.get("namespaces", {}),
+                chosen,
+                selected,
+                mapping,
+            )
         root["profiles"][selected] = remap(profiles[chosen], mapping)
         for alias in target_aliases:
             root["profileKeys"][alias] = Atom(selected)

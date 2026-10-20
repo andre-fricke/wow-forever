@@ -1,9 +1,9 @@
 name: Addon backup tests
 on:
   push:
-    paths: ['tools/addon-backup/**', '.github/workflows/addon-backup.yml']
+    paths: ['tools/addon-backup/**', 'addon/RestedXPTextOnly/**', '.github/workflows/addon-backup.yml']
   pull_request:
-    paths: ['tools/addon-backup/**', '.github/workflows/addon-backup.yml']
+    paths: ['tools/addon-backup/**', 'addon/RestedXPTextOnly/**', '.github/workflows/addon-backup.yml']
 permissions:
   contents: read
 jobs:

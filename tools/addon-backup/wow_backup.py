@@ -15,6 +15,7 @@ from runtime import wow_is_running
 
 # Re-export the core API for existing scripts; implementations live in focused modules.
 from restore import (
+    click_casting_plan,
     helper_plan,
     require_backup_kind,
     install_plan,
@@ -396,8 +397,8 @@ def menu_action():
         parent = action
         print(
             {
-                "1": "1.1  Backup Addons\n1.2  Backup Macros\n1.3  Verify Backup\n1.4  Delete Backup",
-                "2": "2.1  Restore Addons\n2.2  Restore Macros",
+                "1": "1.1  Backup Addons\n1.2  Backup Macros\n1.3  Backup Click Casting\n1.4  Verify Backup\n1.5  Delete Backup",
+                "2": "2.1  Restore Addons\n2.2  Restore Macros\n2.3  Restore Click Casting",
                 "3": "3.1  Restore Recovery Point\n3.2  Delete Recovery Point",
             }[parent]
         )
@@ -408,23 +409,50 @@ def menu_action():
         action = selected if "." in selected else parent + "." + selected
         if not action.startswith(parent + "."):
             raise ValueError("Unknown selection")
-    if action in ("1.1", "1.2"):
+    if action in ("1.1", "1.2", "1.3"):
         client = choose_client()
         char = choose_character(client)
         wait_for_wow_closed()
-        if not identity(char):
-            apply_plan(
-                client,
-                helper_plan(client, character=char),
-                "Prepare character detection for backup",
-                character=char,
-            )
+        snapshot = None
+        if action == "1.2":
+            from macro_placement import placement_snapshot
+            try:
+                snapshot = placement_snapshot(
+                    (char / "SavedVariables" / "WoWUITransferIdentity.lua").read_bytes()
+                )
+            except FileNotFoundError:
+                pass  # First capture needs one helper login.
+            except ValueError as error:
+                print(str(error))
+        needs_login = not identity(char) or (action == "1.2" and snapshot is None)
+        if needs_login or action == "1.2":
+            # Keep the helper installed/enabled for future sessions. Updating its
+            # files does not invalidate an already captured compatible snapshot.
+            preparation = {
+                rel: data
+                for rel, data in helper_plan(client, character=char).items()
+                if not rooted(client, rel).exists()
+                or rooted(client, rel).read_bytes() != data
+            }
+            if preparation:
+                apply_plan(
+                    client, preparation, "Prepare character detection for backup",
+                    character=char,
+                )
+        if needs_login:
             print(
                 'Start WoW, log in with the template character, then quit completely. If needed, enable "WoW UI Transfer Identity" in the AddOns menu (and Load out of date AddOns).'
             )
             input("Press Enter when finished …")
             wait_for_wow_closed()
-        create_backup(client, char, kind="addons" if action == "1.1" else "macros")
+        if action == "1.2":
+            if snapshot is None:
+                placement_snapshot(
+                    (char / "SavedVariables" / "WoWUITransferIdentity.lua").read_bytes()
+                )
+            else:
+                print("Using macro action bar slots saved at the last logout.")
+        create_backup(client, char, kind={"1.1": "addons", "1.2": "macros", "1.3": "click-casting"}[action])
     elif action == "2.1":
         archive = choose_snapshot("addons")
         if archive is None:
@@ -503,7 +531,11 @@ def menu_action():
             or "character"
         )
         wait_for_wow_closed()
-        plan, notes = macro_plan(archive, manifest, client, char, scope)
+        from macro_placement import has_placement
+        slots_available = has_placement(archive, manifest)
+        plan, notes = macro_plan(
+            archive, manifest, client, char, scope, restore_slots=False
+        )
         preview = FilePlan.capture(client, plan, rooted, file_sha)
         print("Destination: " + str(char))
         if scope in ("account", "both"):
@@ -511,7 +543,7 @@ def menu_action():
                 "Account macros are shared by ALL characters on the destination account."
             )
         show_macro_notes(notes)
-        if not plan:
+        if not plan and not slots_available:
             print("No changes required.")
             return
         if input(
@@ -519,23 +551,64 @@ def menu_action():
         ).strip().lower() not in ("y", "yes"):
             print("Cancelled; no macros restored.")
             return
+        if slots_available:
+            restore_slots = input(
+                "Also restore macro action bar slots (replaces actions in those slots)? [y/N]: "
+            ).strip().lower() in ("y", "yes")
+            if restore_slots:
+                preview.check_destination(client, rooted, file_sha)
+                plan, slot_notes = macro_plan(
+                    archive, manifest, client, char, scope, restore_slots=True
+                )
+                preview = FilePlan.capture(client, plan, rooted, file_sha)
+                for note in slot_notes:
+                    if note not in notes:
+                        print(note)
+        else:
+            print("This older backup has no macro action bar slots.")
+        if not plan:
+            print("No changes required.")
+            return
         execute_plan(
             client,
             preview,
             "Restore macros to " + char.name + " (" + scope + ")",
             character=char,
         )
+    elif action == "2.3":
+        archive = choose_snapshot("click-casting")
+        if archive is None:
+            return
+        print("Verifying backup …", flush=True)
+        manifest = verify_backup(archive)
+        require_backup_kind(manifest, "click-casting")
+        print("Source character: " + manifest["source_identity"]["full"])
+        client = choose_client()
+        char = choose_character(client)
+        wait_for_wow_closed()
+        plan, notes = click_casting_plan(archive, manifest, client, char)
+        preview = FilePlan.capture(client, plan, rooted, file_sha)
+        print("Destination: " + str(char))
+        for note in notes:
+            print(note)
+        if not plan:
+            print("No changes required.")
+            return
+        if input("Replace this character's built-in Click Casting settings? [y/N]: ").strip().lower() not in ("y", "yes"):
+            print("Cancelled; no Click Casting settings restored.")
+            return
+        execute_plan(client, preview, "Restore Click Casting to " + char.name, character=char)
     elif action == "3.1":
         selected = choose_recovery()
         if selected is None:
             return
         wait_for_wow_closed()
         undo(selected)
-    elif action == "1.4":
+    elif action == "1.5":
         deletion_menu()
     elif action == "3.2":
         deletion_menu(recovery=True)
-    elif action == "1.3":
+    elif action == "1.4":
         archive = choose_snapshot()
         if archive is None:
             return
@@ -561,6 +634,7 @@ def main():
             "prepare",
             "restore",
             "restore-macros",
+            "restore-click-casting",
             "undo",
         ],
         default="menu",
@@ -582,6 +656,11 @@ def main():
         help="Also replace existing addon versions with versions from the backup",
     )
     ap.add_argument(
+        "--restore-macro-slots",
+        action="store_true",
+        help="Also place restored macros in captured action slots on next login",
+    )
+    ap.add_argument(
         "--macro-scope",
         choices=["character", "account", "both"],
         default="character",
@@ -589,7 +668,7 @@ def main():
     )
     ap.add_argument(
         "--backup-kind",
-        choices=["addons", "macros", "combined"],
+        choices=["addons", "macros", "click-casting", "combined"],
         default="addons",
         help="Contents for backup (default: addons)",
     )
@@ -609,9 +688,12 @@ def main():
         wait_for_wow_closed()
         return undo(args.recovery)
     archive = args.backup or latest_backup(
-        "macros"
-        if args.action == "restore-macros"
-        else "addons" if args.action in ("prepare", "restore") else None
+        {
+            "restore-click-casting": "click-casting",
+            "restore-macros": "macros",
+            "prepare": "addons",
+            "restore": "addons",
+        }.get(args.action)
     )
     manifest = verify_backup(archive)
     if args.action == "verify":
@@ -626,11 +708,18 @@ def main():
             raise ValueError("Quit WoW before applying changes and specify --closed.")
         wait_for_wow_closed()
     client = args.client.resolve()
-    if args.action == "restore-macros":
+    if args.action == "restore-click-casting":
+        if not args.character:
+            raise ValueError("--character is required")
+        plan, notes = click_casting_plan(archive, manifest, client, args.character)
+        for note in notes:
+            print(note)
+    elif args.action == "restore-macros":
         if not args.character:
             raise ValueError("--character is required")
         plan, notes = macro_plan(
-            archive, manifest, client, args.character, args.macro_scope
+            archive, manifest, client, args.character, args.macro_scope,
+            restore_slots=args.restore_macro_slots,
         )
         if args.macro_scope in ("account", "both"):
             print(

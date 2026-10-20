@@ -153,7 +153,7 @@ print(
 )
 
 # Cancelling any restore/verify selection must not perform work.
-for action in ("1.3", "2.1", "2.2"):
+for action in ("1.4", "2.1", "2.2", "2.3"):
     with (
         patch("builtins.input", side_effect=[action, "0"]),
         patch.object(w, "choose_snapshot", return_value=None),

@@ -47,7 +47,7 @@ class BackupManifest:
                 raise ValueError("Invalid backup manifest: " + key)
         if not isinstance(value.get("source_character"), str):
             raise ValueError("Invalid backup source character path")
-        if value.get("kind", "combined") not in ("addons", "macros", "combined"):
+        if value.get("kind", "combined") not in ("addons", "macros", "click-casting", "combined"):
             raise ValueError("Unknown backup kind")
         if not isinstance(value.get("unsupported", []), list):
             raise ValueError("Invalid backup review list")

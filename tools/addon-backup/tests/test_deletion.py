@@ -138,7 +138,7 @@ print(
 )
 
 # The new menu routes invoke the correct deletion flow.
-for answers, recovery in ((["1", "4", "0"], False), (["3", "2", "0"], True)):
+for answers, recovery in ((["1", "5", "0"], False), (["3", "2", "0"], True)):
     with (
         patch("builtins.input", side_effect=answers),
         patch.object(w, "deletion_menu") as deletion,

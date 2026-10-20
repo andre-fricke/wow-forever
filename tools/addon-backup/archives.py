@@ -6,7 +6,9 @@ import json
 import os
 from pathlib import Path
 import zipfile
-from characters import characters, identity, inventory
+from characters import characters, identity, inventory, HELPER
+from macro_placement import placement_snapshot
+from saved_variables import parse
 from addon_support import audit_support
 from models import BackupManifest
 from file_ops import (
@@ -30,14 +32,14 @@ def backup_directory(info, kind, *, paths):
         rooted(paths.backups, relative + "/" + folder).mkdir(
             parents=True, exist_ok=True
         )
-    folder = {"addons": "Addons", "macros": "Macros", "combined": "Combined"}[kind]
+    folder = {"addons": "Addons", "macros": "Macros", "click-casting": "Click_Casting", "combined": "Combined"}[kind]
     destination = rooted(paths.backups, relative + "/" + folder)
     destination.mkdir(parents=True, exist_ok=True)
     return destination
 
 
 def create_backup(client, char, kind="combined", *, paths):
-    if kind not in ("addons", "macros", "combined"):
+    if kind not in ("addons", "macros", "click-casting", "combined"):
         raise ValueError("Unknown backup type")
     client = client.resolve()
     char = char.resolve()
@@ -48,8 +50,8 @@ def create_backup(client, char, kind="combined", *, paths):
         raise ValueError(
             "Template identity is missing. Prepare character detection and log in with the template character first."
         )
-    installed = inventory(client / "Interface/AddOns") if kind != "macros" else {}
-    unsupported = audit_support(client, char) if kind != "macros" else []
+    installed = inventory(client / "Interface/AddOns") if kind in ("addons", "combined") else {}
+    unsupported = audit_support(client, char) if kind in ("addons", "combined") else []
     destination = backup_directory(info, kind, paths=paths)
     filename = (
         stamp()
@@ -65,15 +67,29 @@ def create_backup(client, char, kind="combined", *, paths):
     temp = dest.with_suffix(".partial")
     members = {}
     roots = [client / "Interface/AddOns", client / "WTF"]
-    macro_paths = {char / "macros-cache.txt", char.parent.parent / "macros-cache.txt"}
-    if kind == "macros":
+    selected_paths = {char / "macros-cache.txt", char.parent.parent / "macros-cache.txt"}
+    if kind in ("macros", "click-casting"):
         roots = [None]
-    if kind == "macros" and not any(p.exists() for p in macro_paths):
+    if kind == "click-casting":
+        selected_paths = {char / "click-bindings-cache.txt"}
+        if not (char / "click-bindings-cache.txt").is_file():
+            raise ValueError("No saved WoW Click Casting settings found. Configure Click Casting on the source character and quit WoW first.")
+    if kind == "macros" and not any(p.exists() for p in selected_paths):
         raise ValueError("No saved macro files found for this character or account.")
+    if kind == "macros":
+        helper = char / "SavedVariables" / (HELPER + ".lua")
+        if helper.exists() and "WoWUITransferBars" in parse(helper.read_bytes()):
+            snapshot = placement_snapshot(helper.read_bytes())
+            account_slots = sum(entry["scope"] == "account" for entry in snapshot["slots"].values())
+            print(f"Macro action slots captured: {len(snapshot['slots']) - account_slots} character, {account_slots} account.")
+            selected_paths.add(helper)
+        else:
+            print("No macro slot snapshot available; this backup contains macro files only. Use the interactive backup to capture slots.")
     print(
         {
             "addons": "Backing up addon files and locally saved UI settings …",
             "macros": "Backing up character and account macros …",
+            "click-casting": "Backing up built-in WoW Click Casting settings …",
             "combined": "Backing up addon files, macros, and locally saved WTF settings …",
         }[kind],
         flush=True,
@@ -82,7 +98,7 @@ def create_backup(client, char, kind="combined", *, paths):
         with zipfile.ZipFile(temp, "w", zipfile.ZIP_DEFLATED, compresslevel=4) as z:
             count = 0
             for root in roots:
-                for p in sorted(macro_paths if kind == "macros" else root.rglob("*")):
+                for p in sorted(selected_paths if root is None else root.rglob("*")):
                     if kind == "addons" and p.name.startswith("macros-cache."):
                         continue
                     if p.is_symlink():

@@ -66,7 +66,7 @@ New recovery data is stored in `Recovery/<Realm>/<Character>/<Timestamp>/`, with
 
 ## Verifying a backup
 
-Select **1 → 1.3 – Verify Backup**, then choose a realm, character, and backup to check the stored checksums of every archived file. Corrupted backups are rejected before restoration.
+Select **1 → 1.4 – Verify Backup**, then choose a realm, character, and backup to check the stored checksums of every archived file. Corrupted backups are rejected before restoration.
 
 ## Command-line usage
 
@@ -83,7 +83,7 @@ Select **1 → 1.3 – Verify Backup**, then choose a realm, character, and back
 
 This replaces the complete macro file in each selected scope; it does not merge lists. Missing source files leave the corresponding destination unchanged. Existing destination files are backed up and can be restored through **3 → 3.1 – Restore Recovery Point**. The normal addon/UI restore leaves macros unchanged.
 
-Macro names, icons, identifiers, and bodies are preserved exactly. Explicit character names, spell names, and class-specific commands are not rewritten automatically: check them in the game. Action bar placement is not restored by the macro transfer. Offline file copying and undo are tested; live client/server macro synchronization and future release compatibility still need an in-game check after login.
+Macro names, icons, identifiers, and bodies are preserved exactly. Explicit character names, spell names, and class-specific commands are not rewritten automatically: check them in the game. New interactive macro backups also capture standard macro action slots through the identity helper. An existing compatible snapshot from the last logout is reused without another login. The tool ensures the helper is installed and enabled; only missing or incompatible capture data requires logging in and quitting WoW once. Restore asks whether to queue those slots for the next login (default no); accepting replaces actions in those slots only. The helper matches scope, name and body instead of assuming macro IDs are unchanged. Use /wuibars outside combat with an empty cursor to retry missing or blocked placements. Old backups have no placement data. Recovery cannot undo action slots already applied in the game. Offline file copying and undo are tested; live client/server macro synchronization and future release compatibility still need an in-game check after login.
 
 CLI preview (add `--apply --closed` to write):
 
@@ -95,19 +95,19 @@ python3 -B wow_backup.py restore-macros --backup /path/to/snapshot.zip --client 
 
 The main menu offers **1 – Backup**, **2 – Restore**, **3 – Recovery**, and **0 – Exit**.
 
-- Backup: **1.1 – Backup Addons**, **1.2 – Backup Macros**, **1.3 – Verify Backup**, **1.4 – Delete Backup**.
-- Restore: **2.1 – Restore Addons**, **2.2 – Restore Macros**.
+- Backup: **1.1 – Backup Addons**, **1.2 – Backup Macros**, **1.3 – Backup Click Casting**, **1.4 – Verify Backup**, **1.5 – Delete Backup**.
+- Restore: **2.1 – Restore Addons**, **2.2 – Restore Macros**, **2.3 – Restore Click Casting**.
 - Recovery: **3.1 – Restore Recovery Point**, **3.2 – Delete Recovery Point**.
 
 Within a submenu, enter the last number (for example `2`) or the displayed number (`1.2`). Enter or `0` returns without changes. After an action, the main menu appears again.
 
-Addon backups contain addon packages and locally saved WTF/UI settings, excluding macro cache files. Macro backups contain only `macros-cache.txt` from the selected character and its account. Both include a manifest and checksums and are automatically verified. The filename ends with `_addons.zip` or `_macros.zip`. The optional combined CLI backup is stored in `Backups/<Realm>/<Character>/Combined/`. Older ZIPs directly inside `Backups` remain supported; they do not need to be moved. Interactive restoration lists compatible backups by realm and character, newest first, and rejects the wrong backup type before writing files. CLI restoration without `--backup` uses the newest compatible snapshot. Older combined snapshots remain compatible with both restoration options. To preserve both addons and macros, create both backup types.
+Addon backups contain addon packages and locally saved WTF/UI settings, excluding macro cache files. Macro backups contain `macros-cache.txt` from the selected character and its account, plus the helper's captured macro-slot data when available. Both include a manifest and checksums and are automatically verified. The filename ends with `_addons.zip` or `_macros.zip`. The optional combined CLI backup is stored in `Backups/<Realm>/<Character>/Combined/`. Older ZIPs directly inside `Backups` remain supported; they do not need to be moved. Interactive restoration lists compatible backups by realm and character, newest first, and rejects the wrong backup type before writing files. CLI restoration without `--backup` uses the newest compatible snapshot. Older combined snapshots remain compatible with both restoration options. To preserve both addons and macros, create both backup types.
 
 For CLI backup creation, use `backup --backup-kind addons` or `backup --backup-kind macros` together with `--client`, `--character`, and `--closed`. The CLI defaults to addons; `--backup-kind combined` remains available for compatibility.
 
 ## Deleting backups and recovery points
 
-Select **1 → 1.4 – Delete Backup** to list ZIP snapshots throughout the tool's `Backups` directory, including all realm, character, and type subdirectories. Choose a realm, character, and backup; the final confirmation shows its full path. Select a number, review the full path, and type `y` or `yes` at **Permanently delete this item? [y/N]:**. Enter or `n` cancels. Deletion is permanent. Deleting the current snapshot updates `latest.json` to the newest remaining backup, or removes the pointer if none remain. Recovery points are kept, so previous restores can still be undone.
+Select **1 → 1.5 – Delete Backup** to list ZIP snapshots throughout the tool's `Backups` directory, including all realm, character, and type subdirectories. Choose a realm, character, and backup; the final confirmation shows its full path. Select a number, review the full path, and type `y` or `yes` at **Permanently delete this item? [y/N]:**. Enter or `n` cancels. Deletion is permanent. Deleting the current snapshot updates `latest.json` to the newest remaining backup, or removes the pointer if none remain. Recovery points are kept, so previous restores can still be undone.
 
 Select **3 → 3.2 – Delete Recovery Point** to choose a realm, character, and point from `Recovery` or the older recovery directory. Confirmation deletes that point's entire directory, including its manifest and rollback archive. It removes the ability to undo that operation; it does not undo the operation or change the current WoW installation. Other recovery points and backups are kept.
 
@@ -124,3 +124,25 @@ New recovery points store the destination identity alongside their rollback file
 ## Automatic WoW process check
 
 Interactive backup creation, addon/macro restoration, and recovery-point restoration check the WoW process automatically. If WoW is already closed, the action continues immediately. Otherwise, quit the game while the tool waits up to 30 seconds. It checks every second and prints `30`, `25`, `20`, `15`, `10`, `5`, and `0` seconds remaining as needed. It continues as soon as WoW closes; a timeout or unavailable process check cancels the current action and returns to the main menu. The tool never force-quits WoW. The same check runs after a character-detection login. CLI write operations use the same process checks and retain the explicit `--closed` flag for compatibility.
+
+## Built-in WoW Click Casting
+
+Use **1 → 1.3 – Backup Click Casting** to save the selected character's
+`click-bindings-cache.txt` in `Backups/<Realm>/<Character>/Click_Casting/`.
+The file must already have been saved by WoW: configure the source character and
+quit the game before backing up. No extra login is required when settings and
+character identity are already available.
+
+Use **2 → 2.3 – Restore Click Casting**, browse realm → character → backup,
+select the destination character, and confirm with `y`. This replaces only that
+character's complete built-in Click Casting settings and creates a recovery point.
+It does not change addon click-casting settings, macros, keyboard bindings or
+action bar placement. Spell/macro references are copied unchanged: restore the
+matching macros first and check that references resolve to the intended macros
+on the destination character. Macro names/bodies are not remapped by this operation.
+Check the bindings after login, especially when changing classes.
+
+CLI preview: `restore-click-casting --client ... --character ... --backup ...`.
+Add `--apply --closed` to write. CLI backup: `backup --backup-kind click-casting
+--client ... --character ... --closed`. Archives are checksum-verified like the
+other backup types. Future client/server synchronization still needs in-game validation.

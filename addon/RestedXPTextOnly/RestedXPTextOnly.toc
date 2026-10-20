@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: RestedXP Text Only
+## Notes: Minimal text-only skin for the RestedXP classic guide window. /rxpt help
+## Author: WoW Forever Tools
+## Version: 1.0.0
+## Dependencies: RXPGuides
+## SavedVariablesPerCharacter: RestedXPTextOnlyDB
+RestedXPTextOnly.lua
