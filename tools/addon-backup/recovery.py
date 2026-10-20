@@ -37,7 +37,9 @@ def recovery_context(client, files, character=None):
             character = rooted(client, candidates.pop())
     if character is None:
         return {"realm": "Unknown Realm", "character": "Unassigned"}
-    character = Path(character).absolute()
+    # Resolve both sides: macOS /var and /tmp can alias /private/var and
+    # /private/tmp. An absolute character path may still use either spelling.
+    character = Path(character).resolve()
     relative = character.relative_to(client).as_posix()
     rooted(client, relative)
     try:

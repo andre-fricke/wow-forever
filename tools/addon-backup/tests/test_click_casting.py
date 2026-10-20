@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import wow_backup as w
+from recovery import recovery_context
 
 
 def write(path, data):
@@ -31,6 +32,19 @@ with tempfile.TemporaryDirectory() as td:
     write(target, b"old click bindings")
     write(dst / "macros-cache.txt", b"unchanged macros")
     write(dst / "bindings-cache.wtf", b"unchanged keys")
+    # Equivalent client paths must work even when only one uses a directory
+    # alias, as happens with /var versus /private/var on macOS CI runners.
+    alias = root / "client-alias"
+    alias.symlink_to(client.resolve(), target_is_directory=True)
+    aliased_character = alias / dst.relative_to(client)
+    context = recovery_context(client.resolve(), {}, aliased_character)
+    assert context["character_path"] == dst.relative_to(client).as_posix()
+    try:
+        recovery_context(client.resolve(), {}, root / "outside")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Recovery accepted a character outside the client")
     with patch.multiple(w, HERE=tool, SNAPSHOTS=tool/"Backups", RECOVERY=tool/"Recovery", LEGACY_RECOVERY=tool/"Legacy"):
         archive = w.create_backup(client, src, kind="click-casting")
         manifest = w.verify_backup(archive)
