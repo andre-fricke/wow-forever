@@ -7,6 +7,7 @@ Standalone macOS tool for versioned addon/UI backups and migration to a new char
 Double-click `WoW-Addon-Backup.command` in Finder. The Backup submenu offers separate addon, macro and built-in Click Casting backups, verification, and backup deletion. The Restore submenu offers addon, macro and built-in Click Casting restoration. The Recovery submenu offers undo and recovery point deletion. After each action, the tool returns to the main menu so you can create a backup and restore it in the same window. Choose **0 – Exit** to quit. Failed or cancelled actions also return to the menu. The interactive tool checks whether WoW is closed and, if necessary, waits up to 30 seconds with a countdown every five seconds. Quit WoW completely during that wait; if it remains open, the action is cancelled.
 
 - [User guide](GUIDE.md)
+- [Shared chat layout investigation and November 4 test](CHAT_LAYOUT_INVESTIGATION.md)
 - [Validation report](VALIDATION.md)
 
 A Git clone does not include personal backups. These are created in `Backups/<Realm>/<Character>/Addons/` or `Macros/`; `latest.json` points to the current snapshot. Recovery data is stored in `Recovery/<Realm>/<Character>/<Timestamp>/`. Backup and recovery selection follows realm → character → file/point, with `0` or Enter to go back. These paths are deliberately excluded from Git. Older `Ruecksicherungen/` directories remain supported and excluded. Back up the entire tool directory, including these local files, separately.

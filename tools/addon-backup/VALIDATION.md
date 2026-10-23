@@ -1,5 +1,13 @@
 # Automatic setup validation on October 23, 2026
 
+The later shared-chat investigation is documented in
+[CHAT_LAYOUT_INVESTIGATION.md](CHAT_LAYOUT_INVESTIGATION.md). Runtime baseline
+`953119c` is preserved for the November 4 in-game test. An opt-in isolated
+reproducer confirms that an initially loaded EllesmereUIChat can overwrite both
+geometry values in an active shared layout before the helper disables it. The
+first-login event ordering still needs in-game verification; this is a known
+remaining issue, not a completed fix.
+
 The synthetic Python suite and Lua 5.1 tests pass with the new automatic setup
 path. No live WoW settings were changed and no personal template was activated.
 Coverage includes private profiles/namespaces, changed identity and realm,
