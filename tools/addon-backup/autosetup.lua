@@ -2,6 +2,11 @@
 -- completed character. Each pending character holds its original template.
 local frame = CreateFrame("Frame")
 local busy = false
+local function Reload()
+    if C_UI and type(C_UI.Reload) == "function" then return C_UI.Reload() end
+    if type(ReloadUI) == "function" then return ReloadUI() end
+    error("UI reload API unavailable")
+end
 local function Say(message)
     DEFAULT_CHAT_FRAME:AddMessage("WoW UI Transfer: " .. message)
 end
@@ -276,7 +281,7 @@ local function Apply(manual)
         if record.phase == "activate" then
             local changed = Activate(template, who)
             record.phase = "settings"
-            if changed then Say("Addon activation saved; reloading for automatic setup."); ReloadUI(); return end
+            if changed then Say("Addon activation saved; reloading for automatic setup."); Reload(); return end
         end
         if record.phase == "settings" then
             if not record.editMode then
@@ -286,7 +291,7 @@ local function Apply(manual)
             Profiles(template, who, record)
             record.phase = "bindings"
             Say("Addon settings applied; reloading once to initialize the layout.")
-            ReloadUI()
+            Reload()
             return
         end
         if template.chat and not record.chat then
@@ -316,7 +321,7 @@ local function Apply(manual)
             -- Persist completion before reloading: chat addons initialize their
             -- windows from the restored cache, and the next login is a no-op.
             Say("Reloading once to finish initializing the restored chat windows.")
-            ReloadUI()
+            Reload()
         end
     end)
     busy = false

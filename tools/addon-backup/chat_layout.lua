@@ -98,7 +98,11 @@ function WoWUITransferChat.Apply(layout)
             if entry.dock > 0 then FCF_DockFrame(frame, entry.dock, false)
             else FCF_UnDockFrame(frame) end
         end
-        if id == 1 or entry.dock == 0 then
+        -- The main window belongs to the active shared Edit Mode layout.
+        -- Moving/saving it can be mirrored into that layout by chat addons,
+        -- changing the position for other characters using the same layout.
+        local editModeOwned = id == 1 and C_EditMode and C_EditMode.GetLayouts
+        if not editModeOwned and (id == 1 or entry.dock == 0) then
             local ratio = UIParent:GetEffectiveScale() / frame:GetEffectiveScale()
             frame:ClearAllPoints()
             frame:SetSize(entry.width * UIParent:GetWidth() * ratio, entry.height * UIParent:GetHeight() * ratio)

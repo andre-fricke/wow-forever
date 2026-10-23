@@ -177,6 +177,15 @@ ChatFrame2.x=0;ChatFrame2.y=0;dock=2
 WoWUITransferChat.Apply(layout)
 assert(math.abs(ChatFrame2.x-1500)<0.0001 and ChatFrame2.y==100 and dock==0 and saves==2)
 assert(ChatFrame1.alpha==0 and ChatFrame2.alpha==0.35)
+C_EditMode={GetLayouts=function() return {} end}
+ChatFrame1.x=123;ChatFrame1.y=456;ChatFrame1.w=555;ChatFrame1.h=222
+ChatFrame2.x=0
+local savedBefore=saves
+WoWUITransferChat.Apply(layout)
+assert(ChatFrame1.x==123 and ChatFrame1.y==456 and ChatFrame1.w==555 and ChatFrame1.h==222)
+assert(saves==savedBefore+1 and math.abs(ChatFrame2.x-1500)<0.0001)
+assert(ChatFrame1.alpha==0)
+C_EditMode=nil
 layout[2].dock=2; WoWUITransferChat.Apply(layout); assert(dock==2)
 combat=true;local before=saves;assert(not pcall(WoWUITransferChat.Apply,layout));assert(saves==before)
 combat=false
@@ -345,6 +354,8 @@ print("PASS transient errors and stale saved errors automatically recover withou
 local cinematic, reloadRequested = true, false
 InCinematic=function() return cinematic end
 ReloadUI=function() reloadRequested=true end
+C_UI={Reload=function() reloadRequested=true end}
+ReloadUI=function() error("Legacy reload must not be called when C_UI.Reload is available") end
 WoWUITransferIdentity=clone(readyIdentity)
 WoWUITransferIdentity.guid="Player-reload-test"
 local reloadTemplate={id="reload-test",source=clone(source),flags={Example=true},profiles={},characters={},chat={}}

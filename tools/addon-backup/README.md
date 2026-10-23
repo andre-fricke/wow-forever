@@ -81,7 +81,11 @@ world or finishing the cinematic. Persistent errors are reported and remain pend
 completed steps are not replayed by retries.
 Full Edit Mode layouts, key
 bindings and display CVars are not imported. The primary chat window can still be
-repositioned by Edit Mode; this does not replace its Edit Mode layout.
+positioned by Edit Mode. On clients with Edit Mode, the helper leaves the main
+chat window's position and size untouched to avoid changing a shared layout;
+Combat Log and custom-window geometry are still restored. Background opacity
+is restored for all captured windows. Reloads prefer `C_UI.Reload`, falling back
+to `ReloadUI` on older clients.
 
 To add chat geometry to an existing template, install the updated helper on the
 source with **4.1**, log in, wait five seconds with the desired layout and quit.
