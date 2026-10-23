@@ -65,6 +65,8 @@ local function Capture(atLogout)
     }
 end
 local function Resolve(entry)
+    local managed = WoWUITransferManagedMacro and WoWUITransferManagedMacro(entry)
+    if managed then return managed end
     local accounts, characters = GetNumMacros()
     local first = entry.scope == "account" and 1 or ACCOUNT_LIMIT + 1
     local count = entry.scope == "account" and accounts or characters
@@ -76,6 +78,7 @@ end
 local function Apply()
     local pending = WoWUITransferBarsPending
     if type(pending) ~= "table" or pending.schema ~= 1 then return end
+    if pending.autoSetup and (not WoWUITransferAuto or not WoWUITransferAuto.enabled) then return end
     if InCombatLockdown() or GetCursorInfo() then
         Say("Macro placement is waiting. Leave combat, clear the cursor and use /wuibars.")
         return

@@ -1,3 +1,21 @@
+# Automatic setup validation on October 23, 2026
+
+The synthetic Python suite and Lua 5.1 tests pass with the new automatic setup
+path. No live WoW settings were changed and no personal template was activated.
+Coverage includes private profiles/namespaces, changed identity and realm,
+first-login/reload stages, existing-character exclusions, class differences,
+preserved later edits, template updates during a pending import, macro conflicts,
+capacity limits, stale captures, changed macro indices in native Click Casting,
+blocked API read-back, retries, disabling, menu cancellation and path safety.
+
+The local addon archive was inspected read-only to check recipe extraction.
+In-game rendering, native protected API behavior and the actual release client
+still require validation on a new test character. Automatic setup intentionally
+does not claim parity with offline restoration of Blizzard cache files or
+overwriting existing account-wide addon settings.
+
+---
+
 # Validation on October 18, 2026
 
 The first-version refactor was checked with `python3 -B run_tests.py --require-lua` using Python 3.9 and a temporary Lua 5.1.5 build. All 12 self-contained test scripts passed. No live WoW files were modified.

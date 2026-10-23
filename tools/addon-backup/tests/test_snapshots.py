@@ -93,6 +93,9 @@ with tempfile.TemporaryDirectory() as td:
         )
     write(dst / "config-cache.wtf", b"")
     manifest = w.verify_backup(second)
+    write(dst / "SavedVariables/WoWUITransferIdentity.lua", w.dump({"WoWUITransferIdentity": {
+        **manifest["source_identity"], "guid": "Player-new", "name": "New", "full": "New Surname", "realm": "New Realm"
+    }}))
     macro_files, _ = w.macro_plan(second, manifest, release, dst, "both")
     assert set(macro_files.values()) == {b"character macros v2", b"account macros"}
     plan = w.install_plan(second, manifest, release, character=dst)

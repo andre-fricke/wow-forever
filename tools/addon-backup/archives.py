@@ -85,6 +85,10 @@ def create_backup(client, char, kind="combined", *, paths):
             selected_paths.add(helper)
         else:
             print("No macro slot snapshot available; this backup contains macro files only. Use the interactive backup to capture slots.")
+    if kind in ("macros", "click-casting"):
+        helper = char / "SavedVariables" / (HELPER + ".lua")
+        if helper.exists() and "WoWUITransferSetup" in parse(helper.read_bytes()):
+            selected_paths.add(helper)
     print(
         {
             "addons": "Backing up addon files and locally saved UI settings …",

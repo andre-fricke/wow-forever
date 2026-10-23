@@ -184,7 +184,8 @@ def deletion_menu(recovery=False):
         if recovery
         else "Deleting this backup permanently removes this snapshot. Recovery points are kept."
     )
-    if input("Permanently delete this item? [y/N]: ").strip().lower() not in (
+    if input("Permanently delete this item? [Y/n]: ").strip().lower() not in (
+        "",
         "y",
         "yes",
     ):
@@ -389,17 +390,18 @@ def menu():
 
 def menu_action():
     print("WoW – Addon Backup for Beta → Release\n")
-    print("1  Backup\n2  Restore\n3  Recovery\n0  Exit")
+    print("1  Backup\n2  Restore\n3  Recovery\n4  Automatic setup\n0  Exit")
     action = input("Selection: ").strip()
     if action == "0":
         return False
-    if action in ("1", "2", "3"):
+    if action in ("1", "2", "3", "4"):
         parent = action
         print(
             {
                 "1": "1.1  Backup Addons\n1.2  Backup Macros\n1.3  Backup Click Casting\n1.4  Verify Backup\n1.5  Delete Backup",
                 "2": "2.1  Restore Addons\n2.2  Restore Macros\n2.3  Restore Click Casting",
                 "3": "3.1  Restore Recovery Point\n3.2  Delete Recovery Point",
+                "4": "4.1  Install / update capture helper\n4.2  Configure / update automatic setup\n4.3  Show automatic setup status\n4.4  Disable automatic setup",
             }[parent]
         )
         print("0  Back to main menu")
@@ -409,6 +411,8 @@ def menu_action():
         action = selected if "." in selected else parent + "." + selected
         if not action.startswith(parent + "."):
             raise ValueError("Unknown selection")
+    if action.startswith("4."):
+        return automatic_setup_menu(action)
     if action in ("1.1", "1.2", "1.3"):
         client = choose_client()
         char = choose_character(client)
@@ -471,8 +475,8 @@ def menu_action():
                 "Character detection needs one login. This preparation only installs/enables the identity helper."
             )
             if input(
-                "Prepare character detection now? [y/N]: "
-            ).strip().lower() not in ("y", "yes"):
+                "Prepare character detection now? [Y/n]: "
+            ).strip().lower() not in ("", "y", "yes"):
                 return
             preparation = FilePlan.capture(
                 client, helper_plan(client, character=char), rooted, file_sha
@@ -501,8 +505,8 @@ def menu_action():
         for note in notes:
             print(note)
         if input(
-            "Are you sure you want to restore the selected addon settings? [y/N]: "
-        ).strip().lower() not in ("y", "yes"):
+            "Are you sure you want to restore the selected addon settings? [Y/n]: "
+        ).strip().lower() not in ("", "y", "yes"):
             print("Cancelled; no addon files or settings restored.")
             return
         execute_plan(
@@ -547,14 +551,14 @@ def menu_action():
             print("No changes required.")
             return
         if input(
-            "Are you sure you want to replace the selected macro files? [y/N]: "
-        ).strip().lower() not in ("y", "yes"):
+            "Are you sure you want to replace the selected macro files? [Y/n]: "
+        ).strip().lower() not in ("", "y", "yes"):
             print("Cancelled; no macros restored.")
             return
         if slots_available:
             restore_slots = input(
-                "Also restore macro action bar slots (replaces actions in those slots)? [y/N]: "
-            ).strip().lower() in ("y", "yes")
+                "Also restore macro action bar slots (replaces actions in those slots)? [Y/n]: "
+            ).strip().lower() in ("", "y", "yes")
             if restore_slots:
                 preview.check_destination(client, rooted, file_sha)
                 plan, slot_notes = macro_plan(
@@ -594,7 +598,7 @@ def menu_action():
         if not plan:
             print("No changes required.")
             return
-        if input("Replace this character's built-in Click Casting settings? [y/N]: ").strip().lower() not in ("y", "yes"):
+        if input("Replace this character's built-in Click Casting settings? [Y/n]: ").strip().lower() not in ("", "y", "yes"):
             print("Cancelled; no Click Casting settings restored.")
             return
         execute_plan(client, preview, "Restore Click Casting to " + char.name, character=char)
@@ -620,6 +624,74 @@ def menu_action():
             print("Needs review: " + ", ".join(pending_reviews(manifest)))
     else:
         raise ValueError("Unknown selection")
+
+
+def automatic_setup_menu(action):
+    from auto_setup import configure_plan, disable_plan, read_state
+
+    if action not in ("4.1", "4.2", "4.3", "4.4"):
+        raise ValueError("Unknown selection")
+    client = choose_client()
+    print("Choose an existing character to identify the account (it will not be auto-restored).")
+    char = choose_character(client)
+    if action == "4.3":
+        _, state = read_state(client, char)
+        if not state:
+            print("Automatic setup is not configured for this account.")
+            return
+        template = state.get("template", {})
+        source = template.get("source", {})
+        print("Automatic setup: " + ("enabled" if state.get("enabled") else "disabled"))
+        print("Template: " + source.get("full", "unknown") + " / " + source.get("realm", "unknown"))
+        print("Template ID: " + template.get("id", "unknown"))
+        print("Status reflects the last saved state; quit WoW to see the latest results.")
+        for guid, record in state.get("characters", {}).items():
+            status = "complete" if record.get("done") else "pending: " + record.get("phase", "unknown")
+            if record.get("classSkipped"):
+                status += " (bindings skipped by older helper; update helper and use /wuisetup bindings)"
+            if record.get("error"):
+                status += " – " + record["error"]
+            if record.get("skippedAddons"):
+                status += " – skipped missing addons: " + ", ".join(sorted(record["skippedAddons"]))
+            print(record.get("full", guid) + " / " + record.get("realm", "unknown realm") + ": " + status)
+        return
+    wait_for_wow_closed()
+    if action == "4.1":
+        files = helper_plan(client, character=char)
+        plan = FilePlan.capture(client, files, rooted, file_sha)
+        execute_plan(client, plan, "Install automatic setup capture helper", character=char)
+        print("Log in with the source character, wait at least 5 seconds after editing macros or Click Casting, then quit WoW and create fresh backups. Existing valid captures can be reused.")
+        return
+    if action == "4.4":
+        files = disable_plan(client, char)
+        label = "Disable automatic character setup"
+        print("Stops future and pending automatic imports. Already imported settings remain unchanged.")
+    else:
+        print("Select the addon template backup.")
+        addons = choose_snapshot("addons")
+        if addons is None:
+            return
+        macros = clicks = None
+        if input("Include macros and captured action slots? [Y/n]: ").strip().lower() not in ("n", "no"):
+            macros = choose_snapshot("macros")
+            if macros is None:
+                return
+        if input("Include native Click Casting? [Y/n]: ").strip().lower() not in ("n", "no"):
+            clicks = choose_snapshot("click-casting")
+            if clicks is None:
+                return
+        files, notes = configure_plan(client, char, addons, macros, clicks)
+        for note in notes:
+            print(note)
+        label = "Configure automatic character setup"
+    if not files:
+        print("No changes required.")
+        return
+    preview = FilePlan.capture(client, files, rooted, file_sha)
+    if input("Apply this automatic setup configuration? [Y/n]: ").strip().lower() not in ("", "y", "yes"):
+        print("Cancelled; nothing changed.")
+        return
+    execute_plan(client, preview, label, character=char)
 
 
 def main():

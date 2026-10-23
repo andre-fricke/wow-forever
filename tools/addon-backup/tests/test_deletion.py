@@ -52,7 +52,6 @@ with tempfile.TemporaryDirectory() as td:
             for answers in (
                 ["0"],
                 [""],
-                ["1", "1", "1", ""],
                 ["1", "1", "1", "n"],
                 ["1", "1", "1", "invalid"],
             ):
@@ -69,7 +68,7 @@ with tempfile.TemporaryDirectory() as td:
                 w.deletion_menu(recovery)
         # Confirmed menu deletion removes only the chosen backup and repairs latest.json.
         with (
-            patch("builtins.input", side_effect=["1", "1", "1", "y"]),
+            patch("builtins.input", side_effect=["1", "1", "1", ""]),
             redirect_stdout(io.StringIO()),
         ):
             w.deletion_menu()

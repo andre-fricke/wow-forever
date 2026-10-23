@@ -15,9 +15,124 @@ A Git clone does not include personal backups. These are created in `Backups/<Re
 
 Interactive **Backup Macros** ensures the identity helper is installed and enabled, then uses the compatible macro-slot snapshot saved at the character's last logout. No additional login is required when that snapshot and character identity already exist. Only missing or incompatible data requires one login and a complete WoW exit with the helper enabled. The snapshot captures macro assignments in standard action slots 1–180, including paged bars, alongside character/account macro files. It does not capture addon-specific buttons that execute macro text directly, bar geometry, or key bindings.
 
-**Restore Macros** first asks you to confirm replacing the selected macro files. Only after that confirmation does it ask whether to restore those slots (`[y/N]`, default no). No files are written until both decisions are complete; declining placement still restores the macros. Only slots belonging to the selected macro scope are queued. On the next login the helper finds macros by scope, name and body, then replaces actions in the captured slots. Other slots are left alone. Completed placements are not repeated on later logins. Combat, an occupied cursor or missing macros can defer placement; check the chat message and use `/wuibars` to retry outside combat with an empty cursor.
+**Restore Macros** first asks you to confirm replacing the selected macro files. Only after that confirmation does it ask whether to restore those slots (`[Y/n]`, Enter confirms). No files are written until both decisions are complete; declining placement still restores the macros. Only slots belonging to the selected macro scope are queued. On the next login the helper finds macros by scope, name and body, then replaces actions in the captured slots. Other slots are left alone. Completed placements are not repeated on later logins. Combat, an occupied cursor or missing macros can defer placement; check the chat message and use `/wuibars` to retry outside combat with an empty cursor.
 
 Older backups remain usable without placement. Empty slot snapshots from helper 1.1 are unreliable and require one new capture with helper 1.2. New captures count detected macros and report unresolved slots instead of silently dropping them; duplicate macro names may need renaming. Backup and restore print character/account slot counts. The CLI can opt in with `restore-macros --restore-macro-slots`; CLI backups use the last captured slot snapshot and warn if none exists. Refresh it by logging in/out with the updated helper before taking a CLI backup. Local recovery points can cancel a queued placement before login, but cannot undo server-side action slots after they have been applied. In-game verification is still required.
+
+## Automatic setup for new characters
+
+The **4 – Automatic setup** submenu prepares an account template for the existing
+**WoW UI Transfer Identity** helper; no separate addon is required.
+
+Helper 1.5 selects the existing custom Edit Mode layout named exactly `default`
+once, before applying addon profiles. It does not overwrite or import shared
+layout contents. Missing or duplicate names leave setup pending with an explicit
+message. On a fresh account, create/import this layout first. After completion,
+later layout choices are preserved. For an already initialized character,
+`/wuieditmode` explicitly selects `default` without replaying addon settings.
+
+1. Use **4.1 – Install / update capture helper** on the source character. Log in
+   once with the current helper, wait at least five seconds after editing macros or native
+   Click Casting, then quit WoW completely. Create addon, macro and Click Casting
+   backups. Existing compatible captures can be reused; each backup stays immutable.
+2. Use **4.2 – Configure / update automatic setup**. Select the destination client
+   and an existing character to identify the account, then choose the three source
+   backups (macros and Click Casting are optional). Review the compatibility notes
+   and confirm. This installs missing packages, updates the helper, and writes the
+   account template in one recoverable transaction. Existing addon versions stay.
+3. Keep the helper enabled. Create a **new level-1 character** on that account and
+   log in. The helper applies supported settings and may reload the UI up to three
+   times, including a final reload to initialize restored chat windows. Completion
+   is saved before that final reload, so subsequent logins do not repeat setup.
+   Completion or a specific pending error is printed in chat. `/wuisetup` retries
+   outside combat with an empty cursor. **4.3** shows the last saved status.
+4. **4.2** can select newer backups for future characters. Completed characters
+   are never reset; pending characters retain their original template. **4.4**
+   disables future/pending imports without undoing already applied changes.
+
+Existing local characters are excluded by GUID. When no GUID is recorded, their
+name is conservatively excluded across all realms. Unseen characters above level
+1 are also excluded. A new release account needs one initial login to establish
+its account directory before configuration; that initial character uses manual
+restore, and subsequent new characters can use automatic setup. Realms, names and
+GUIDs for new characters are taken from the game, not guessed from folder names.
+
+**Scope:** active AceDB profiles and their namespaces get private per-character
+copies, including supported Prat and RestedXP profiles. Reviewed character settings
+are copied with identity remapping and existing progress retained. Shared settings
+(including EllesmereUI's account profile) are inherited. If a reviewed account
+file is missing, preparation seeds it once; the preview explicitly lists these
+account-wide changes. Existing shared files are not overwritten. This is not an
+automatic equivalent of every offline restore adapter: unknown configurations are
+listed. Helper 1.4 additionally captures persistent chat-window positions, sizes,
+docking order and lock state, including Combat Log, into addon backups. These are
+applied once after the settings reload. New captures include each window's background
+opacity (including fully transparent backgrounds), and custom-window
+message groups and channel assignments. Restore reuses a persistent window with
+the same name or creates one, then restores its subscriptions and geometry.
+Window IDs may differ on the destination. Unrelated windows are not renamed.
+Private channels are not joined automatically; their membership/passwords are not
+part of this capture. Older captures without subscriptions skip missing custom
+windows with a message. Capture a fresh addon backup to enable window creation.
+Older captures without opacity retain the destination opacity. After updating the
+helper, log into the source, quit WoW and create a fresh addon backup to capture it.
+Automatic setup retries temporary errors for up to one minute after entering the
+world or finishing the cinematic. Persistent errors are reported and remain pending;
+completed steps are not replayed by retries.
+Full Edit Mode layouts, key
+bindings and display CVars are not imported. The primary chat window can still be
+repositioned by Edit Mode; this does not replace its Edit Mode layout.
+
+To add chat geometry to an existing template, install the updated helper on the
+source with **4.1**, log in, wait five seconds with the desired layout and quit.
+Create a new **addon** backup and select it in **4.2**; unchanged macro and Click
+Casting backups can be reused. On an already initialized destination, `/wuichat`
+explicitly restores only chat geometry from the current account template. It does
+not reapply other settings or change the automatic setup completion marker.
+
+Macros and native Click Casting are imported even when the character's class
+differs from the source. A shared Python import policy replaces named spell
+operands in `/cast`, `/spell`, `/castrandom` and `/castsequence` with literal `null`
+when classes differ. Conditions, sequence reset options, names, icons and file IDs
+are preserved. `/use`, tooltips, Lua scripts, numeric operands and item references
+are not guessed or rewritten. Same-class bodies remain byte-for-byte unchanged.
+Native Click Casting spell IDs remain unchanged; its macro references resolve to
+the transformed macro bodies. Manual menu/CLI restoration and automatic templates
+use `macro_transform.py`; Lua selects a precompiled variant rather than parsing
+macro text again. Update prepared templates with **4.2** after policy changes.
+Manual restoration needs a recorded destination class to select the right variant.
+Menu **4.2** also upgrades older pending imports that have not applied any bindings:
+it compiles variants from each pending import's original macros, retaining its
+settings and completed stages. Already applied bindings and completed characters
+are not migrated or replayed. Resume the same pending character after configuration.
+For characters
+marked complete by an older helper that skipped bindings because of their class,
+update the helper with **4.1**, then run `/wuisetup bindings` in game. This explicitly
+imports only the skipped bindings from the current account template, without
+reapplying addon profiles or chat geometry. Identical macros are reused; different macros
+with the same name and insufficient capacity leave the operation pending without
+overwriting existing macros. Account macros remain shared. Imports and action-slot
+placement reuse current same-scope `Decursive` and `RS_MACRO` macros when their
+owning addon is loaded and the name is unique. These addon-maintained contents
+are not overwritten with an older body or a cross-class `null` variant. Other
+same-name/different-body conflicts still stop the import. A missing owner does
+not grant this exception. Click Casting macro
+references are remapped by identity, never by copying source API indices. Only
+captured macro action slots are replaced, once. Native API restrictions can block
+an import; read-back verification keeps it pending instead of reporting success.
+
+Older backups without helper 1.3 API captures remain valid for manual restores.
+Automatic macros/Click Casting require new captures; macro captures are also
+checked against their archived cache files. If the scope/name sets match uniquely,
+the archived macro files supply the bodies and icons, including bodies regenerated
+by addons after the API capture. Slot and Click Casting macro references receive
+the same bodies before the import policy is compiled. Missing, renamed or duplicate
+macro names are rejected rather than guessing index mappings. The template is
+stored in the selected account's `SavedVariables/WoWUITransferIdentity.lua`, outside
+Git, and is independent of the source ZIPs after preparation. Do not share that
+file publicly. Local recovery can undo preparation, but cannot undo in-game macro,
+action-slot or Click Casting changes already applied to the server. Check a new
+test character in game before relying on this workflow on release day.
 
 ## Tests
 

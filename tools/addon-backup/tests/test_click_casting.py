@@ -95,7 +95,7 @@ with tempfile.TemporaryDirectory() as td:
             ):
                 w.menu()
                 choose.assert_called_once_with("click-casting")
-                assert apply.call_count == (1 if answer == "y" else 0)
+                assert apply.call_count == (1 if answer in ("", "y") else 0)
         # CLI defaults to the latest matching backup and supports a read-only preview.
         with (
             patch.object(sys, "argv", ["tool", "restore-click-casting", "--client", str(client), "--character", str(dst)]),

@@ -21,6 +21,12 @@ You can then copy the entire tool directory to another drive. Restoration no lon
 
 ## On release day
 
+For automatic initialization of **subsequent new characters**, see
+[Automatic setup for new characters](README.md#automatic-setup-for-new-characters).
+Menu **4** configures the account template, displays progress, or disables it.
+Prepare fresh helper 1.3 captures before the beta ends. The following manual
+workflow also covers settings that cannot be applied by the in-game helper.
+
 1. Install the **release client** and updated release versions of your addons if available. The tool keeps existing addon versions by default.
 2. Create the new character, log in once, and quit WoW completely. This creates the account, realm, and character directories.
 3. Launch **WoW-Addon-Backup.command** and select **2 → 2.1 – Restore Addons**.
@@ -79,11 +85,11 @@ Select **1 → 1.4 – Verify Backup**, then choose a realm, character, and back
 3. Log in once with the destination character, then quit WoW completely.
 4. Select **2 → 2.2 – Restore Macros**, choose the source realm, source character, and macro backup, then the destination installation and destination character.
 5. Choose `character` (default), `account`, or `both`. Account macros are shared by every character on that account.
-6. Review the destination paths and macro counts. The tool automatically waits for WoW to close. At **Are you sure you want to replace the selected macro files? [y/N]:**, type `y` or `yes` to apply; Enter or `n` cancels.
+6. Review the destination paths and macro counts. The tool automatically waits for WoW to close. At **Are you sure you want to replace the selected macro files? [Y/n]:**, press Enter or type `y` or `yes` to apply; `n` cancels.
 
 This replaces the complete macro file in each selected scope; it does not merge lists. Missing source files leave the corresponding destination unchanged. Existing destination files are backed up and can be restored through **3 → 3.1 – Restore Recovery Point**. The normal addon/UI restore leaves macros unchanged.
 
-Macro names, icons, identifiers, and bodies are preserved exactly. Explicit character names, spell names, and class-specific commands are not rewritten automatically: check them in the game. New interactive macro backups also capture standard macro action slots through the identity helper. An existing compatible snapshot from the last logout is reused without another login. The tool ensures the helper is installed and enabled; only missing or incompatible capture data requires logging in and quitting WoW once. Restore asks whether to queue those slots for the next login (default no); accepting replaces actions in those slots only. The helper matches scope, name and body instead of assuming macro IDs are unchanged. Use /wuibars outside combat with an empty cursor to retry missing or blocked placements. Old backups have no placement data. Recovery cannot undo action slots already applied in the game. Offline file copying and undo are tested; live client/server macro synchronization and future release compatibility still need an in-game check after login.
+Macro names, icons and identifiers are preserved. For a different destination class, named spells in /cast, /spell, /castrandom and /castsequence become null. Same-class bodies are unchanged. Conditions remain intact; /use, tooltips, scripts, numeric operands and explicit character names are not rewritten. Manual import requires a recorded destination class. New interactive macro backups also capture standard macro action slots through the identity helper. An existing compatible snapshot from the last logout is reused without another login. The tool ensures the helper is installed and enabled; only missing or incompatible capture data requires logging in and quitting WoW once. Restore asks whether to queue those slots for the next login (default no); accepting replaces actions in those slots only. The helper matches scope, name and body instead of assuming macro IDs are unchanged. Use /wuibars outside combat with an empty cursor to retry missing or blocked placements. Old backups have no placement data. Recovery cannot undo action slots already applied in the game. Offline file copying and undo are tested; live client/server macro synchronization and future release compatibility still need an in-game check after login.
 
 CLI preview (add `--apply --closed` to write):
 
@@ -107,7 +113,7 @@ For CLI backup creation, use `backup --backup-kind addons` or `backup --backup-k
 
 ## Deleting backups and recovery points
 
-Select **1 → 1.5 – Delete Backup** to list ZIP snapshots throughout the tool's `Backups` directory, including all realm, character, and type subdirectories. Choose a realm, character, and backup; the final confirmation shows its full path. Select a number, review the full path, and type `y` or `yes` at **Permanently delete this item? [y/N]:**. Enter or `n` cancels. Deletion is permanent. Deleting the current snapshot updates `latest.json` to the newest remaining backup, or removes the pointer if none remain. Recovery points are kept, so previous restores can still be undone.
+Select **1 → 1.5 – Delete Backup** to list ZIP snapshots throughout the tool's `Backups` directory, including all realm, character, and type subdirectories. Choose a realm, character, and backup; the final confirmation shows its full path. Select a number, review the full path, and press Enter or type `y` or `yes` at **Permanently delete this item? [Y/n]:**. `n` cancels. Deletion is permanent. Deleting the current snapshot updates `latest.json` to the newest remaining backup, or removes the pointer if none remain. Recovery points are kept, so previous restores can still be undone.
 
 Select **3 → 3.2 – Delete Recovery Point** to choose a realm, character, and point from `Recovery` or the older recovery directory. Confirmation deletes that point's entire directory, including its manifest and rollback archive. It removes the ability to undo that operation; it does not undo the operation or change the current WoW installation. Other recovery points and backups are kept.
 

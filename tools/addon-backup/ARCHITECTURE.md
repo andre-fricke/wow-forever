@@ -1,5 +1,20 @@
 # Architecture and maintenance
 
+Automatic initialization is a separate opt-in path: `auto_setup.py` verifies and
+compiles archives into data-only account templates; `setup_capture.lua` captures
+macro identities and native Click Casting; `autosetup.lua` applies a template once
+per unseen level-1 GUID. The existing helper TOC loads these modules. Updates must
+preserve account state and pending per-character work.
+
+The runtime imports AceDB profiles through `SetProfile` and merges reviewed
+character settings in place. Arbitrary offline adapters are not assumed to be
+runtime-compatible. Shared account settings are seeded only into missing files
+during explicit preparation. Completed stages are checkpointed; pending characters
+retain their original template across configuration updates. Macro identity
+matching and native Click Casting read-back verification are mandatory. Completed
+characters are never reapplied. All personal template/state content stays outside
+Git. Synthetic lifecycle tests are in `tests/test_auto_setup.py` and `.lua`.
+
 The tool has no third-party runtime dependencies. Keep all Python modules and the launcher files together when distributing it. Existing schema-1 backup ZIPs, flat backup directories, and legacy recovery archives remain readable.
 
 | Module | Responsibility |

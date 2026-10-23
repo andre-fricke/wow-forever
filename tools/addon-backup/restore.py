@@ -6,6 +6,7 @@ import zipfile
 from characters import HELPER, identity, inventory, characters
 from saved_variables import encode, decode, parse, dump
 from macro_placement import placement_member, placement_snapshot
+from macro_transform import transform_cache, transform_entries
 from models import CharacterIdentity
 from file_ops import Archived, rooted, sha
 from addon_support import pending_reviews
@@ -38,7 +39,7 @@ def helper_plan(client, manifest=None, character=None):
     toc = (
         "## Interface: "
         + ", ".join(sorted(interfaces, key=int))
-        + "\n## Title: WoW UI Transfer Identity\n## Notes: Records character identity and macro slots for backup restoration.\n## Version: 1.2\n## SavedVariablesPerCharacter: WoWUITransferIdentity, WoWUITransferBars, WoWUITransferBarsPending\nidentity.lua\nactionbars.lua\n"
+        + "\n## Title: WoW UI Transfer Identity\n## Notes: Captures backups and initializes new characters from an optional template.\n## Version: 1.6\n## DefaultState: enabled\n## SavedVariables: WoWUITransferAuto\n## SavedVariablesPerCharacter: WoWUITransferIdentity, WoWUITransferBars, WoWUITransferBarsPending, WoWUITransferSetup\nidentity.lua\nmanaged_macros.lua\nactionbars.lua\nchat_layout.lua\nedit_mode.lua\nsetup_capture.lua\nautosetup.lua\n"
     )
     prefix = "Interface/AddOns/" + HELPER + "/"
     plan = {
@@ -51,6 +52,8 @@ def helper_plan(client, manifest=None, character=None):
             Path(__file__).resolve().parent / "identity.lua"
         ).read_bytes(),
     }
+    for script in ("managed_macros.lua", "chat_layout.lua", "edit_mode.lua", "setup_capture.lua", "autosetup.lua"):
+        plan[prefix + script] = (Path(__file__).resolve().parent / script).read_bytes()
     for char in [character] if character is not None else characters(client):
         p = char / "AddOns.txt"
         txt = decode(p.read_bytes()) if p.exists() else ""
@@ -282,7 +285,7 @@ def click_casting_plan(archive, manifest, client, char):
 
 
 def macro_plan(archive, manifest, client, char, scope="character", restore_slots=False):
-    """Restore complete macro files without changing macro bodies or identifiers."""
+    """Restore macro files and placements using the shared macro import policy."""
     require_backup_kind(manifest, "macros")
     client = client.resolve()
     char = char.resolve()
@@ -297,6 +300,12 @@ def macro_plan(archive, manifest, client, char, scope="character", restore_slots
     }
     plan = {}
     notes = []
+    source_class = manifest.get("source_identity", {}).get("class")
+    target_class = (identity(char) or {}).get("class")
+    different_class = bool(source_class and target_class and source_class != target_class)
+    if source_class and not target_class:
+        raise ValueError("Target class is unknown. Install the helper with menu 4.1, log in with the destination character and quit WoW first.")
+    notes.append("Different class: spell names in /cast, /spell, /castrandom and /castsequence are replaced with null. Other commands remain unchanged." if different_class else "Macro bodies are copied unchanged.")
     with zipfile.ZipFile(archive) as z:
         for kind in ("character", "account") if scope == "both" else (scope,):
             src, dst = locations[kind]
@@ -311,6 +320,7 @@ def macro_plan(archive, manifest, client, char, scope="character", restore_slots
             # Validate the selected payload even when called outside the CLI/menu.
             if sha(data) != manifest["files"][member]["sha256"]:
                 raise ValueError("Corrupted backup file: " + member)
+            data = transform_cache(data, different_class)
             rel = (dst / "macros-cache.txt").relative_to(client).as_posix()
             target = rooted(client, rel)
             count = sum(line.startswith(b"VER ") for line in data.splitlines())
@@ -334,6 +344,7 @@ def macro_plan(archive, manifest, client, char, scope="character", restore_slots
                 slot: entry for slot, entry in snapshot["slots"].items()
                 if scope == "both" or entry["scope"] == scope
             }
+            slots = transform_entries(slots, different_class)
             for entry in slots.values():
                 src, _ = locations[entry["scope"]]
                 if str(src / "macros-cache.txt") not in manifest["files"]:
@@ -365,7 +376,7 @@ def show_macro_notes(notes):
     for note in notes:
         print(note)
     print(
-        "Macro bodies are copied unchanged. Check class-specific spells and explicit character names in the game."
+        "Check unsupported commands, item references and explicit character names in the game; these are not rewritten."
     )
     print(
         "Only explicitly selected macro slots are queued for placement. Check the result after login; client/server synchronization requires in-game validation."

@@ -107,7 +107,7 @@ with (
     backup.assert_not_called()
     assert "after 30 seconds" in errors.getvalue()
 
-# Enter and n cancel macro replacement; only y/yes (case-insensitive) apply it.
+# Enter confirms macro replacement; n and invalid responses cancel.
 for answer in ("", "n", "N", "invalid", "y", "Y", "yes", "YES"):
     with (
         patch("builtins.input", side_effect=["2", "2", "character", answer, "0"]),
@@ -123,11 +123,11 @@ for answer in ("", "n", "N", "invalid", "y", "Y", "yes", "YES"):
         redirect_stdout(io.StringIO()),
     ):
         w.menu()
-        assert wait.call_count == (2 if answer.lower() in ("y", "yes") else 1)
-        if answer.lower() in ("y", "yes"):
+        assert wait.call_count == (2 if answer.lower() in ("", "y", "yes") else 1)
+        if answer.lower() in ("", "y", "yes"):
             apply.assert_called_once()
         else:
             apply.assert_not_called()
 print(
-    "PASS process detection, fail-closed checks, countdown, early exit, timeout and macro y/N confirmation"
+    "PASS process detection, fail-closed checks, countdown, early exit, timeout and macro Y/n confirmation"
 )

@@ -93,7 +93,7 @@ with tempfile.TemporaryDirectory() as td:
     assert len(saved_manifest["files"]) == 3
 
 # The menu explicitly offers yes/no placement independently of macro replacement.
-for answer, enabled in (("", False), ("n", False), ("y", True)):
+for answer, enabled in (("", True), ("n", False), ("y", True)):
     with (
         patch("builtins.input", side_effect=["2", "2", "both", "y", answer, "0"]) as prompts,
         patch.object(w, "choose_snapshot", return_value=Path("/test/backup.zip")),
